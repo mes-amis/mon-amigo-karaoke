@@ -71,10 +71,28 @@ def _line_text(line: Line, event_start: float) -> str:
     return "".join(tokens)
 
 
+def _title_card_text(title: str, artist: str = "", album: str = "") -> str:
+    """Compose the title-card dialogue body.
+
+    The song title sits on top in the big Title style; an optional
+    credit line ("Artist — Album", or whichever is available) appears
+    below it in a smaller italic face. ``\\N`` is ASS's hard line-break,
+    ``\\fs`` resets font size, ``\\i1`` turns italics on.
+    """
+    pieces = [p for p in (artist.strip(), album.strip()) if p]
+    body = _escape(title)
+    if pieces:
+        credit = _escape(" — ".join(pieces))
+        body += f"\\N{{\\fs72\\i1}}{credit}"
+    return body
+
+
 def build_ass(
     lines: list[Line],
     out: Path,
     title: str = "",
+    artist: str = "",
+    album: str = "",
     lead_in: float = 0.6,
     title_duration: float = 3.0,
     crossfade: float = 0.3,
@@ -102,9 +120,10 @@ def build_ass(
         if lines:
             title_end = min(title_end, max(0.1, lines[0].start - 0.2))
         if title_end > 0.2:
+            body = _title_card_text(title, artist=artist, album=album)
             events.append(
                 f"Dialogue: 0,{_ass_time(0)},{_ass_time(title_end)},Title,,0,0,0,,"
-                f"{{\\fad(300,400)}}{_escape(title)}"
+                f"{{\\fad(300,400)}}{body}"
             )
 
     fade_out_ms = int(round(crossfade * 1000))

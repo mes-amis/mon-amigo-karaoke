@@ -10,9 +10,10 @@ import time
 from pathlib import Path
 
 from .background import create_synthwave_background
+from .metadata import resolve_metadata
 from .mix import mix_stems
 from .render import render_video
-from .stems import find_stems, song_title
+from .stems import Song, find_songs
 from .subtitles import build_ass
 from .transcribe import group_into_lines, transcribe
 
@@ -23,6 +24,54 @@ DEFAULT_OUTPUT_DIR = Path("~/Desktop/mon-amigo-karaoke").expanduser()
 def _safe_filename(name: str) -> str:
     bad = '<>:"/\\|?*'
     return "".join("_" if c in bad else c for c in name).strip() or "karaoke"
+
+
+def _match_song(songs: list[Song], query: str) -> Song:
+    q = query.strip().lower()
+    matches = [s for s in songs if q in s.title.lower()]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError(
+            f"--song {query!r} matched nothing. Available:\n"
+            + "\n".join(f"  - {s.title}" for s in songs)
+        )
+    raise ValueError(
+        f"--song {query!r} is ambiguous — {len(matches)} songs match:\n"
+        + "\n".join(f"  - {s.title}" for s in matches)
+    )
+
+
+def _prompt_for_song(songs: list[Song]) -> Song:
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "multiple songs found in the stems folder but stdin isn't a "
+            "terminal. Re-run with --song <name_substring> to pick one.\n"
+            "Available:\n"
+            + "\n".join(f"  - {s.title}" for s in songs)
+        )
+
+    print(f"\nFound {len(songs)} songs in the stems folder:", file=sys.stderr)
+    for i, song in enumerate(songs, 1):
+        print(f"  [{i}] {song.title}", file=sys.stderr)
+    print(file=sys.stderr)
+
+    while True:
+        try:
+            raw = input(f"Select a song [1-{len(songs)}]: ").strip()
+        except EOFError:
+            print("\naborted", file=sys.stderr)
+            sys.exit(130)
+        if not raw:
+            continue
+        try:
+            idx = int(raw) - 1
+        except ValueError:
+            print(f"  not a number: {raw!r}", file=sys.stderr)
+            continue
+        if 0 <= idx < len(songs):
+            return songs[idx]
+        print(f"  out of range; please enter 1-{len(songs)}", file=sys.stderr)
 
 
 def main() -> None:
@@ -37,6 +86,21 @@ def main() -> None:
     ap.add_argument(
         "-o", "--output", type=Path,
         help=f"Output video path (default: {DEFAULT_OUTPUT_DIR}/<song-title>.mp4)",
+    )
+    ap.add_argument(
+        "--song", default=None,
+        help="When the stems folder holds more than one song, pick one by "
+             "a case-insensitive substring of its title. If omitted and "
+             "several songs are present, you'll be prompted to choose.",
+    )
+    ap.add_argument(
+        "--artist", default=None,
+        help="Override the artist credit shown on the title card. "
+             "If omitted, we try to look it up in Music.app (macOS only).",
+    )
+    ap.add_argument(
+        "--album", default=None,
+        help="Override the album credit shown on the title card.",
     )
     ap.add_argument(
         "--model", default="medium.en",
@@ -69,17 +133,45 @@ def main() -> None:
     args = ap.parse_args()
 
     try:
-        stems = find_stems(args.folder)
+        songs = find_songs(args.folder)
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(2)
 
-    title = song_title(stems)
+    if not songs:
+        print(
+            f"error: no complete stem sets found in {args.folder}.\n"
+            "Expected files named like 'Song (Vocals).aif', '... (Bass).aif', etc.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    try:
+        if args.song:
+            song = _match_song(songs, args.song)
+        elif len(songs) == 1:
+            song = songs[0]
+        else:
+            song = _prompt_for_song(songs)
+    except (ValueError, RuntimeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    stems = song.stems
+    title = song.title
+    meta = resolve_metadata(
+        title,
+        artist_override=args.artist,
+        album_override=args.album,
+    )
     out_path = (
         args.output or DEFAULT_OUTPUT_DIR / f"{_safe_filename(title)}.mp4"
     ).expanduser().resolve()
 
     print(f"[karaoke] song:    {title}")
+    if meta["artist"] or meta["album"]:
+        credit = " — ".join(p for p in (meta["artist"], meta["album"]) if p)
+        print(f"[karaoke] credit:  {credit}")
     print(f"[karaoke] stems:   {', '.join(stems.keys())}")
     print(f"[karaoke] output:  {out_path}")
 
@@ -97,7 +189,10 @@ def main() -> None:
         print(f"[karaoke] {len(words)} words grouped into {len(lines)} lines")
 
         ass_path = work / "lyrics.ass"
-        build_ass(lines, ass_path, title=title)
+        build_ass(
+            lines, ass_path,
+            title=title, artist=meta["artist"], album=meta["album"],
+        )
 
         bg_path = work / "background.png"
         print("[karaoke] painting synthwave backdrop...")

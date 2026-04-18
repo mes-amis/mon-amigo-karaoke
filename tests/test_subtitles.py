@@ -39,6 +39,52 @@ def test_escape_neutralises_libass_control_chars() -> None:
     assert _escape("line\nbreak") == "line break"
 
 
+def test_title_card_includes_artist_and_album_credit(tmp_path: Path) -> None:
+    out = tmp_path / "lyrics.ass"
+    build_ass(
+        [_line(("a", 5.0, 5.5))],
+        out,
+        title="Doctor Worm",
+        artist="They Might Be Giants",
+        album="John Henry",
+    )
+
+    text = out.read_text()
+    title_event = [l for l in text.splitlines() if ",Title,," in l]
+    assert len(title_event) == 1
+    body = title_event[0].split(",,", 1)[1]
+    assert "Doctor Worm" in body
+    assert "They Might Be Giants" in body
+    assert "John Henry" in body
+    # Credit line uses an em dash between artist and album.
+    assert "They Might Be Giants — John Henry" in body
+    # And uses ASS override codes to shrink + italicise the credit.
+    assert "\\N{\\fs72\\i1}" in body
+
+
+def test_title_card_with_only_artist(tmp_path: Path) -> None:
+    out = tmp_path / "lyrics.ass"
+    build_ass(
+        [_line(("a", 5.0, 5.5))],
+        out,
+        title="Doctor Worm",
+        artist="They Might Be Giants",
+    )
+
+    body = [l for l in out.read_text().splitlines() if ",Title,," in l][0]
+    assert "They Might Be Giants" in body
+    assert " — " not in body  # no album means no em-dash separator
+
+
+def test_title_card_without_credits(tmp_path: Path) -> None:
+    out = tmp_path / "lyrics.ass"
+    build_ass([_line(("a", 5.0, 5.5))], out, title="Doctor Worm")
+
+    body = [l for l in out.read_text().splitlines() if ",Title,," in l][0]
+    # No \N (line break) when there's no credit line to add.
+    assert "\\N" not in body
+
+
 def test_build_ass_writes_header_and_one_event_per_line(tmp_path: Path) -> None:
     lines = [
         _line(("hello", 1.0, 1.4), ("world", 1.5, 1.9)),
