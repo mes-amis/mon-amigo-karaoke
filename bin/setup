@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+#
+# bin/setup — prepare this checkout so `bin/karaoke` just works.
+#
+# Steps:
+#   1. Verify Python 3.10+
+#   2. Install ffmpeg via Homebrew if it's missing
+#   3. Create .venv and install Python dependencies
+#   4. Pre-download the default Whisper model (medium.en, ~1.5 GB)
+#
+# Re-running is safe — every step is a no-op if already satisfied.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+cd "$ROOT"
+
+if [[ -t 1 ]]; then
+  PINK=$'\033[1;35m'; YEL=$'\033[1;33m'; RED=$'\033[1;31m'; RST=$'\033[0m'
+else
+  PINK=''; YEL=''; RED=''; RST=''
+fi
+say()  { printf '%s[setup]%s %s\n' "$PINK" "$RST" "$*"; }
+warn() { printf '%s[setup]%s %s\n' "$YEL"  "$RST" "$*" >&2; }
+die()  { printf '%s[setup]%s %s\n' "$RED"  "$RST" "$*" >&2; exit 1; }
+
+SKIP_MODEL=0
+MODEL="medium.en"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-model)
+      SKIP_MODEL=1; shift ;;
+    --model)
+      [[ $# -ge 2 ]] || die "--model needs a value (e.g. small.en, medium.en, large)"
+      MODEL="$2"; shift 2 ;;
+    -h|--help)
+      cat <<EOF
+Usage: bin/setup [--no-model] [--model <name>]
+
+Prepares the project to run ./bin/karaoke:
+  - Verifies Python 3.10+
+  - Installs ffmpeg via Homebrew if missing
+  - Creates .venv and installs Python dependencies
+  - Pre-downloads the Whisper model weights (default: ${MODEL})
+
+Flags:
+  --no-model         Skip the Whisper weight download.
+  --model <name>     Pre-download a different model (e.g. small.en, large).
+EOF
+      exit 0 ;;
+    *) die "unknown flag: $1 (see --help)" ;;
+  esac
+done
+
+# --- 1. Python --------------------------------------------------------------
+command -v python3 >/dev/null \
+  || die "python3 not found. Install Python 3.10+ (e.g. 'brew install python@3.12')."
+PY_VER=$(python3 -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' \
+  || die "Python 3.10+ required (found ${PY_VER}). Try 'brew install python@3.12'."
+say "python3 ${PY_VER} ok"
+
+# --- 2. ffmpeg --------------------------------------------------------------
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  warn "ffmpeg not found"
+  if command -v brew >/dev/null 2>&1; then
+    say "installing ffmpeg with Homebrew (this can take a few minutes)..."
+    brew install ffmpeg
+  else
+    die "ffmpeg is required. Install Homebrew (https://brew.sh) then: brew install ffmpeg"
+  fi
+fi
+FFMPEG_VER=$(ffmpeg -version | head -n1 | awk '{print $3}')
+say "ffmpeg ${FFMPEG_VER} ok"
+
+# --- 3. virtualenv + Python deps -------------------------------------------
+VENV="$ROOT/.venv"
+if [[ ! -d "$VENV" ]]; then
+  say "creating virtualenv at .venv"
+  python3 -m venv "$VENV"
+else
+  say "virtualenv .venv already exists"
+fi
+# shellcheck disable=SC1091
+source "$VENV/bin/activate"
+
+say "upgrading pip / setuptools / wheel"
+python -m pip install --upgrade pip setuptools wheel >/dev/null
+
+say "installing Python dependencies (first run pulls PyTorch; ~1 GB)..."
+pip install -r "$ROOT/requirements.txt"
+
+# --- 4. Whisper weights -----------------------------------------------------
+if [[ $SKIP_MODEL -eq 1 ]]; then
+  say "skipping Whisper weight download (--no-model)"
+else
+  say "pre-downloading Whisper model: ${MODEL}"
+  MODEL="$MODEL" python - <<'PY'
+import os, whisper
+name = os.environ["MODEL"]
+whisper.load_model(name)
+cache = os.path.expanduser("~/.cache/whisper")
+print(f"[setup] cached {name} under {cache}")
+PY
+fi
+
+cat <<EOF
+
+${PINK}[setup]${RST} All set. Try:
+
+    ./bin/karaoke "/Users/craig/Music/Ableton/Live Recordings/.../Stems"
+
+${PINK}[setup]${RST} bin/karaoke auto-uses .venv, so you don't need to activate it.
+EOF
