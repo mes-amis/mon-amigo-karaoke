@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from .transcribe import Line
@@ -24,7 +25,8 @@ YCbCr Matrix: TV.709
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Karaoke,Impact,104,&H00FF40FF,&H00F5F5F5,&H00200040,&H96000000,-1,0,0,0,100,100,1,0,1,5,3,2,80,80,150,1
-Style: Title,Impact,140,&H0000E5FF,&H00FFFFFF,&H00200040,&H96000000,-1,0,0,0,100,100,2,0,1,6,4,8,0,0,80,1
+Style: Title,Impact,120,&H0000E5FF,&H00FFFFFF,&H00200040,&H96000000,-1,0,0,0,100,100,2,0,1,6,4,7,80,1020,80,1
+Style: Credit,Impact,64,&H00E5FFFF,&H00FFFFFF,&H00200040,&H96000000,-1,0,0,0,100,100,0,0,1,5,3,9,1020,80,80,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -71,19 +73,63 @@ def _line_text(line: Line, event_start: float) -> str:
     return "".join(tokens)
 
 
-def _title_card_text(title: str, artist: str = "", album: str = "") -> str:
-    """Compose the title-card dialogue body.
+TITLE_BASE_SIZE = 120
+TITLE_MIN_SIZE = 48
+TITLE_AREA_WIDTH_PX = 820   # 1920 - MarginL(80) - MarginR(1020) from the Title style
+TITLE_AREA_HEIGHT_PX = 260  # room for two wrapped lines before we bump the sun
 
-    The song title sits on top in the big Title style; an optional
-    credit line ("Artist — Album", or whichever is available) appears
-    below it in a smaller italic face. ``\\N`` is ASS's hard line-break,
-    ``\\fs`` resets font size, ``\\i1`` turns italics on.
+
+def _fit_title_font_size(
+    text: str,
+    base_size: int = TITLE_BASE_SIZE,
+    min_size: int = TITLE_MIN_SIZE,
+    max_width_px: int = TITLE_AREA_WIDTH_PX,
+    max_height_px: int = TITLE_AREA_HEIGHT_PX,
+    char_width_ratio: float = 0.5,
+    line_height_ratio: float = 1.25,
+) -> int:
+    """Largest font size where the wrapped title fits the top-left card area.
+
+    Impact is a condensed display face, so ~0.5 × font_size is a fair
+    rule-of-thumb character width (bold adds a hair but not enough to
+    matter here). The search steps down in 4 pt increments and stops
+    as soon as the estimated rendering fits in `max_width_px × max_height_px`.
     """
-    pieces = [p for p in (artist.strip(), album.strip()) if p]
-    body = _escape(title)
-    if pieces:
-        credit = _escape(" — ".join(pieces))
-        body += f"\\N{{\\fs72\\i1}}{credit}"
+    if not text:
+        return base_size
+    for size in range(base_size, min_size - 1, -4):
+        chars_per_line = max(1, int(max_width_px / (size * char_width_ratio)))
+        num_lines = math.ceil(len(text) / chars_per_line)
+        total_height = num_lines * size * line_height_ratio
+        if total_height <= max_height_px:
+            return size
+    return min_size
+
+
+def _title_dialogue_body(title: str) -> str:
+    """Dialogue body for the Title (left side) card, with inline wrap + shrink."""
+    fs = _fit_title_font_size(title)
+    # \q0 = smart wrap for this event only (the file-wide WrapStyle is 2
+    # so lyric lines stay on a single line each).
+    prefix = f"{{\\q0\\fad(300,400)"
+    if fs != TITLE_BASE_SIZE:
+        prefix += f"\\fs{fs}"
+    prefix += "}"
+    return prefix + _escape(title)
+
+
+def _credit_dialogue_body(artist: str, album: str) -> str | None:
+    """Dialogue body for the Credit (right side) card — artist over album."""
+    parts = [p for p in (artist.strip(), album.strip()) if p]
+    if not parts:
+        return None
+    body = "{\\q0\\fad(300,400)}"
+    # Artist on line 1 (regular weight), album on line 2 in italics so
+    # the two stack clearly even when both are short.
+    if len(parts) == 2:
+        body += f"{_escape(parts[0])}\\N{{\\i1}}{_escape(parts[1])}"
+    else:
+        body += _escape(parts[0])
     return body
 
 
@@ -104,6 +150,9 @@ def build_ass(
     Args:
         lead_in: seconds the line appears on screen before its first word
             is sung — the singer's reading-ahead preview.
+        title_duration: minimum seconds to show the title card. Songs
+            with a long instrumental intro keep the card visible right
+            up to the first lyric — this number is the floor, not a cap.
         crossfade: seconds of overlap between the outgoing line and the
             incoming line. During this window both lines are visible, with
             the outgoing one fading out while the incoming one fades in,
@@ -116,15 +165,28 @@ def build_ass(
     events: list[str] = []
 
     if title:
-        title_end = title_duration
         if lines:
-            title_end = min(title_end, max(0.1, lines[0].start - 0.2))
+            first_event_start = max(0.0, lines[0].start - lead_in)
+            # Hold the title until the first lyric's event appears (with a
+            # tiny crossfade overlap), or ``title_duration``, whichever is
+            # longer. Before this change the title blinked out 3 s in even
+            # when the instrumental intro ran for 15 s.
+            title_end = max(title_duration, first_event_start + crossfade)
+        else:
+            title_end = title_duration
+
         if title_end > 0.2:
-            body = _title_card_text(title, artist=artist, album=album)
+            # Title on the left (wraps around the sun), credits on the right.
             events.append(
                 f"Dialogue: 0,{_ass_time(0)},{_ass_time(title_end)},Title,,0,0,0,,"
-                f"{{\\fad(300,400)}}{body}"
+                f"{_title_dialogue_body(title)}"
             )
+            credit = _credit_dialogue_body(artist, album)
+            if credit:
+                events.append(
+                    f"Dialogue: 0,{_ass_time(0)},{_ass_time(title_end)},Credit,,0,0,0,,"
+                    f"{credit}"
+                )
 
     fade_out_ms = int(round(crossfade * 1000))
 

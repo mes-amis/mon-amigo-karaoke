@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from karaoke.subtitles import _ass_time, _escape, build_ass
 from karaoke.transcribe import Line, Word
 
@@ -39,7 +41,13 @@ def test_escape_neutralises_libass_control_chars() -> None:
     assert _escape("line\nbreak") == "line break"
 
 
-def test_title_card_includes_artist_and_album_credit(tmp_path: Path) -> None:
+def test_title_card_splits_into_title_and_credit_events(tmp_path: Path) -> None:
+    """When artist + album are present, the card emits two dialogues.
+
+    The title sits in the left-side Title style and the artist/album
+    sits in the right-side Credit style, so long titles don't collide
+    with the credit text in the middle of the frame.
+    """
     out = tmp_path / "lyrics.ass"
     build_ass(
         [_line(("a", 5.0, 5.5))],
@@ -49,20 +57,23 @@ def test_title_card_includes_artist_and_album_credit(tmp_path: Path) -> None:
         album="John Henry",
     )
 
-    text = out.read_text()
-    title_event = [l for l in text.splitlines() if ",Title,," in l]
-    assert len(title_event) == 1
-    body = title_event[0].split(",,", 1)[1]
-    assert "Doctor Worm" in body
-    assert "They Might Be Giants" in body
-    assert "John Henry" in body
-    # Credit line uses an em dash between artist and album.
-    assert "They Might Be Giants — John Henry" in body
-    # And uses ASS override codes to shrink + italicise the credit.
-    assert "\\N{\\fs72\\i1}" in body
+    lines = out.read_text().splitlines()
+    title_events = [l for l in lines if ",Title,," in l]
+    credit_events = [l for l in lines if ",Credit,," in l]
+    assert len(title_events) == 1
+    assert len(credit_events) == 1
+
+    title_body = title_events[0].split(",,", 1)[1]
+    assert "Doctor Worm" in title_body
+
+    credit_body = credit_events[0].split(",,", 1)[1]
+    assert "They Might Be Giants" in credit_body
+    assert "John Henry" in credit_body
+    # Artist stacks above an italic album via \N + \i1.
+    assert "\\N{\\i1}" in credit_body
 
 
-def test_title_card_with_only_artist(tmp_path: Path) -> None:
+def test_title_card_with_only_artist_omits_album_line(tmp_path: Path) -> None:
     out = tmp_path / "lyrics.ass"
     build_ass(
         [_line(("a", 5.0, 5.5))],
@@ -71,18 +82,83 @@ def test_title_card_with_only_artist(tmp_path: Path) -> None:
         artist="They Might Be Giants",
     )
 
-    body = [l for l in out.read_text().splitlines() if ",Title,," in l][0]
-    assert "They Might Be Giants" in body
-    assert " — " not in body  # no album means no em-dash separator
+    lines = out.read_text().splitlines()
+    credit_body = [l for l in lines if ",Credit,," in l][0].split(",,", 1)[1]
+    assert "They Might Be Giants" in credit_body
+    # Only one credit line → no line break for an album.
+    assert "\\N" not in credit_body
 
 
-def test_title_card_without_credits(tmp_path: Path) -> None:
+def test_title_card_without_credits_has_no_credit_event(tmp_path: Path) -> None:
     out = tmp_path / "lyrics.ass"
     build_ass([_line(("a", 5.0, 5.5))], out, title="Doctor Worm")
 
-    body = [l for l in out.read_text().splitlines() if ",Title,," in l][0]
-    # No \N (line break) when there's no credit line to add.
-    assert "\\N" not in body
+    lines = out.read_text().splitlines()
+    assert [l for l in lines if ",Credit,," in l] == []
+
+
+def test_long_title_gets_shrunk_font_override(tmp_path: Path) -> None:
+    """A title far wider than the left-half area gets a smaller \\fs."""
+    out = tmp_path / "lyrics.ass"
+    long_title = "Dry Your Eyes (Concert Version) [feat. Neil Diamond]"
+    build_ass([_line(("a", 5.0, 5.5))], out, title=long_title)
+
+    title_body = [
+        l for l in out.read_text().splitlines() if ",Title,," in l
+    ][0].split(",,", 1)[1]
+    match = re.search(r"\\fs(\d+)", title_body)
+    assert match is not None, f"expected a \\fs override in long-title body: {title_body!r}"
+    assert int(match.group(1)) < 120  # shrunk below the style default
+
+
+def test_short_title_keeps_base_font(tmp_path: Path) -> None:
+    """A short title fits at the default size — no \\fs override needed."""
+    out = tmp_path / "lyrics.ass"
+    build_ass([_line(("a", 5.0, 5.5))], out, title="Doctor Worm")
+
+    title_body = [
+        l for l in out.read_text().splitlines() if ",Title,," in l
+    ][0].split(",,", 1)[1]
+    assert "\\fs" not in title_body
+
+
+def test_title_card_holds_through_long_instrumental_intro(tmp_path: Path) -> None:
+    """Long intros keep the title on screen right up to the first lyric.
+
+    Previously the title card ended at ``min(title_duration, first_lyric
+    - 0.2)`` which meant it vanished 3 s in even for songs with a 15 s
+    intro. The fix: hold until the first lyric's event appears.
+    """
+    out = tmp_path / "lyrics.ass"
+    build_ass(
+        [_line(("a", 15.0, 15.4))],
+        out,
+        title="Doctor Worm",
+        lead_in=0.6,
+        title_duration=3.0,
+        crossfade=0.3,
+    )
+
+    title_event = [l for l in out.read_text().splitlines() if ",Title,," in l][0]
+    end_time = _ass_time_to_seconds(title_event.split(",")[2])
+    # First lyric event appears at 15 - 0.6 = 14.4s; title extends to 14.4 + 0.3.
+    assert end_time == pytest.approx(14.7, abs=0.05)
+
+
+def test_title_card_respects_min_duration_when_intro_is_short(tmp_path: Path) -> None:
+    """If the intro is shorter than title_duration the card still gets its floor."""
+    out = tmp_path / "lyrics.ass"
+    build_ass(
+        [_line(("a", 1.0, 1.5))],
+        out,
+        title="Doctor Worm",
+        lead_in=0.6,
+        title_duration=3.0,
+    )
+
+    title_event = [l for l in out.read_text().splitlines() if ",Title,," in l][0]
+    end_time = _ass_time_to_seconds(title_event.split(",")[2])
+    assert end_time >= 3.0
 
 
 def test_build_ass_writes_header_and_one_event_per_line(tmp_path: Path) -> None:
