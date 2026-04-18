@@ -10,11 +10,15 @@ ROOT = os.path.dirname(HERE)
 # If bin/setup has created a .venv and we're not already running inside it,
 # re-exec under that interpreter so dependencies are visible without the user
 # having to `source .venv/bin/activate` first.
-_VENV_PY = os.path.join(ROOT, ".venv", "bin", "python3")
-if (
-    os.path.isfile(_VENV_PY)
-    and os.path.realpath(sys.executable) != os.path.realpath(_VENV_PY)
-):
+#
+# Detect "am I in the venv" via sys.prefix (which venv startup rewrites),
+# not sys.executable — macOS venv pythons are symlinks to the underlying
+# framework interpreter, so comparing realpaths of executables gives a
+# false "already inside" when we're actually running under system Python.
+_VENV = os.path.join(ROOT, ".venv")
+_VENV_PY = os.path.join(_VENV, "bin", "python3")
+_in_venv = os.path.realpath(sys.prefix) == os.path.realpath(_VENV)
+if os.path.isfile(_VENV_PY) and not _in_venv:
     os.execv(_VENV_PY, [_VENV_PY, __file__, *sys.argv[1:]])
 
 sys.path.insert(0, os.path.join(ROOT, "src"))

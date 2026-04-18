@@ -1,2 +1,7 @@
 openai-whisper>=20231117
 Pillow>=10.0
+# truststore lets Python's stdlib urllib / ssl use the macOS Keychain,
+# which is required when a corporate proxy (Zscaler, Netskope, etc.) injects
+# a self-signed root CA — without it, whisper.load_model() cannot download
+# weights over HTTPS.
+truststore>=0.9 ; python_version >= "3.10"

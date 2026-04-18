@@ -23,7 +23,7 @@ YCbCr Matrix: TV.709
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Karaoke,Impact,104,&H00FF40FF,&H00F5F5F5,&H00200040,&H96000000,-1,0,0,0,100,100,1,0,1,5,3,2,80,80,150,1
+Style: Karaoke,Impact,104,&H00FF40FF,&H00F5F5F5,&H00200040,&H96000000,-1,0,0,0,100,100,1,0,1,5,3,2,80,80,350,1
 Style: Title,Impact,140,&H0000E5FF,&H00FFFFFF,&H00200040,&H96000000,-1,0,0,0,100,100,2,0,1,6,4,8,0,0,80,1
 
 [Events]

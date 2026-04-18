@@ -17,6 +17,9 @@ from .subtitles import build_ass
 from .transcribe import group_into_lines, transcribe
 
 
+DEFAULT_OUTPUT_DIR = Path("~/Desktop/mon-amigo-karaoke").expanduser()
+
+
 def _safe_filename(name: str) -> str:
     bad = '<>:"/\\|?*'
     return "".join("_" if c in bad else c for c in name).strip() or "karaoke"
@@ -33,7 +36,7 @@ def main() -> None:
     )
     ap.add_argument(
         "-o", "--output", type=Path,
-        help="Output video path (default: ./<song-title>.mp4)",
+        help=f"Output video path (default: {DEFAULT_OUTPUT_DIR}/<song-title>.mp4)",
     )
     ap.add_argument(
         "--model", default="medium.en",
@@ -72,7 +75,9 @@ def main() -> None:
         sys.exit(2)
 
     title = song_title(stems)
-    out_path = (args.output or Path.cwd() / f"{_safe_filename(title)}.mp4").resolve()
+    out_path = (
+        args.output or DEFAULT_OUTPUT_DIR / f"{_safe_filename(title)}.mp4"
+    ).expanduser().resolve()
 
     print(f"[karaoke] song:    {title}")
     print(f"[karaoke] stems:   {', '.join(stems.keys())}")

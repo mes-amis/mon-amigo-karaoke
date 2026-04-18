@@ -19,20 +19,26 @@ def mix_stems(
     if not order:
         raise ValueError("No instrumental stems available to mix.")
 
+    n = len(order)
     cmd: list[str] = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "warning"]
     for name in order:
         cmd += ["-i", str(stems[name])]
 
+    # amix averages its inputs (output = sum / N) and has no portable way to
+    # disable that before ffmpeg 4.4 (`normalize=0`). To keep per-stem levels
+    # intact on older ffmpeg builds, we pre-scale each input by N so the
+    # implicit /N in amix cancels. The vocal stem also gets its attenuation
+    # dB applied in the same chain.
     filters: list[str] = []
     labels: list[str] = []
     for i, name in enumerate(order):
-        gain = f"{vocals_db}dB" if name == "Vocals" else "0dB"
-        filters.append(f"[{i}:a]volume={gain}[a{i}]")
+        chain = [f"volume={n}"]
+        if name == "Vocals":
+            chain.append(f"volume={vocals_db}dB")
+        filters.append(f"[{i}:a]{','.join(chain)}[a{i}]")
         labels.append(f"[a{i}]")
 
-    filters.append(
-        f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0:duration=longest[out]"
-    )
+    filters.append(f"{''.join(labels)}amix=inputs={n}[out]")
 
     cmd += [
         "-filter_complex", ";".join(filters),

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+#
+# bin/test — run the pytest suite inside the project's venv.
+#
+# Forwards any extra args straight through to pytest, e.g.:
+#   bin/test -k stems          # only stem-related tests
+#   bin/test -x --ff           # stop on first failure, fail fast
+#   bin/test tests/test_cli.py # one file
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+cd "$ROOT"
+
+VENV_PY="$ROOT/.venv/bin/python3"
+if [[ ! -x "$VENV_PY" ]]; then
+  echo "[test] .venv not found — run ./bin/setup first" >&2
+  exit 1
+fi
+
+if ! "$VENV_PY" -c 'import pytest' >/dev/null 2>&1; then
+  echo "[test] installing dev deps (pytest)..."
+  "$VENV_PY" -m pip install -r "$ROOT/requirements-dev.txt" >/dev/null
+fi
+
+exec "$VENV_PY" -m pytest "$ROOT/tests" "$@"

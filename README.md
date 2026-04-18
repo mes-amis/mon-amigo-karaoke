@@ -74,7 +74,7 @@ immediately before the file extension. `.wav`, `.flac`, `.m4a`, `.mp3` and
 # Save the intermediate mix / subtitles / background alongside the video
 ./bin/karaoke /path/to/stems --keep-intermediate
 
-# Specific output path
+# Custom output path (default is ~/Desktop/mon-amigo-karaoke/<title>.mp4)
 ./bin/karaoke /path/to/stems -o ~/Desktop/dry_your_eyes.mp4
 ```
 
@@ -95,6 +95,33 @@ immediately before the file extension. `.wav`, `.flac`, `.m4a`, `.mp3` and
 6. **Render** — `src/karaoke/render.py` ffmpeg-encodes a looping-image video at
    30 fps with the ASS burned in via the `subtitles` filter; audio as AAC;
    `+faststart` for quick preview on the Mac.
+
+## Tests
+
+Run the suite after `bin/setup`:
+
+```sh
+./bin/test                   # full suite
+./bin/test -k stems          # only stem-related tests
+./bin/test tests/test_cli.py # one file
+```
+
+Tests that need ffmpeg or Pillow are auto-skipped if those aren't
+available. The integration test renders a tiny 2-second MP4 end-to-end
+so it catches regressions in the ffmpeg invocation without needing a
+real song.
+
+## Troubleshooting
+
+**`SSLCertVerificationError: self-signed certificate in certificate chain`
+during `bin/setup`** — you're behind a corporate TLS proxy (Zscaler,
+Netskope, company firewall) that replaces the certificate chain with its
+own root CA. The fix is `truststore`, which teaches Python's stdlib
+`ssl` module to use the macOS Keychain (where the corporate root is
+already trusted). It's in `requirements.txt` and called automatically by
+`bin/setup` and `karaoke.transcribe`. If `bin/setup` still fails, confirm
+`truststore` installed and check that your corporate root CA is present
+in Keychain Access → System → Certificates.
 
 ## Tuning
 
