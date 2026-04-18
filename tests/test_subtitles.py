@@ -74,21 +74,56 @@ def test_each_lyric_line_has_one_kf_per_word(tmp_path: Path) -> None:
     assert kf_count >= 3
 
 
-def test_events_are_chronologically_non_overlapping(tmp_path: Path) -> None:
+def _ass_time_to_seconds(t: str) -> float:
+    h, m, s = t.split(":")
+    return int(h) * 3600 + int(m) * 60 + float(s)
+
+
+def test_lines_stay_visible_until_the_next_line_appears(tmp_path: Path) -> None:
+    """No dark gap between consecutive karaoke lines.
+
+    Before the crossfade change, the outgoing line vanished at
+    ``line.end + 0.3s`` and the singer then stared at empty space until
+    the next line appeared. Now the outgoing event is stretched until
+    the incoming line's event_start, with a small overlap so the two
+    crossfade instead of cutting.
+    """
+    # 3-second instrumental gap between two lines — this is where the
+    # abrupt cut used to happen.
     lines = [
-        _line(("a", 1.0, 1.2), ("b", 1.3, 1.5)),
-        _line(("c", 2.0, 2.2), ("d", 2.3, 2.5)),
+        _line(("a", 1.0, 1.5)),
+        _line(("b", 5.0, 5.5)),
     ]
     out = tmp_path / "lyrics.ass"
 
-    build_ass(lines, out, title="")
+    build_ass(lines, out, title="", lead_in=0.6, crossfade=0.3)
 
     dialogues = [
         l for l in out.read_text().splitlines() if l.startswith("Dialogue:") and ",Karaoke," in l
     ]
-    # The event-end of line 1 must not exceed the event-start of line 2.
-    first_end = dialogues[0].split(",")[2]
-    second_start = dialogues[1].split(",")[1]
-    assert first_end <= second_start, (
-        f"karaoke lines overlap: line1 ends {first_end}, line2 starts {second_start}"
-    )
+    first_end = _ass_time_to_seconds(dialogues[0].split(",")[2])
+    second_start = _ass_time_to_seconds(dialogues[1].split(",")[1])
+    # Line 1 stays on screen into Line 2's appearance — that's the
+    # crossfade, not a bug.
+    assert first_end > second_start
+    # But it doesn't linger ridiculously past the crossfade window.
+    assert first_end - second_start <= 0.35
+
+
+def test_min_hold_after_last_syllable_is_respected(tmp_path: Path) -> None:
+    """When lines are nearly back-to-back, min_hold_after still applies."""
+    lines = [
+        _line(("first", 1.0, 1.4)),
+        _line(("second", 1.5, 1.9)),  # 0.1s gap — next event_start
+                                       # would normally precede this end
+    ]
+    out = tmp_path / "lyrics.ass"
+
+    build_ass(lines, out, title="", lead_in=0.6, min_hold_after=0.3)
+
+    dialogues = [
+        l for l in out.read_text().splitlines() if l.startswith("Dialogue:") and ",Karaoke," in l
+    ]
+    first_end = _ass_time_to_seconds(dialogues[0].split(",")[2])
+    # line.end was 1.4; floor says event_end >= 1.7
+    assert first_end >= 1.7 - 1e-3

@@ -77,7 +77,23 @@ def build_ass(
     title: str = "",
     lead_in: float = 0.6,
     title_duration: float = 3.0,
+    crossfade: float = 0.3,
+    min_hold_after: float = 0.3,
+    final_linger: float = 1.5,
 ) -> None:
+    """Write an ASS karaoke file.
+
+    Args:
+        lead_in: seconds the line appears on screen before its first word
+            is sung — the singer's reading-ahead preview.
+        crossfade: seconds of overlap between the outgoing line and the
+            incoming line. During this window both lines are visible, with
+            the outgoing one fading out while the incoming one fades in,
+            so the singer never sees an empty screen between lines.
+        min_hold_after: minimum seconds the line stays visible after its
+            last syllable, even if the next line starts almost on top.
+        final_linger: seconds the last line stays on screen before fading.
+    """
     header = ASS_HEADER_TEMPLATE.format(title=_escape(title))
     events: list[str] = []
 
@@ -91,19 +107,34 @@ def build_ass(
                 f"{{\\fad(300,400)}}{_escape(title)}"
             )
 
+    fade_out_ms = int(round(crossfade * 1000))
+
     for i, line in enumerate(lines):
         event_start = max(0.0, line.start - lead_in)
-        event_end = line.end + 0.3
+
         if i + 1 < len(lines):
-            next_start = max(0.0, lines[i + 1].start - lead_in)
-            event_end = min(event_end, next_start)
+            # Stretch this event all the way to the next line's appearance
+            # (plus a crossfade window), instead of cutting it at
+            # line.end + min_hold_after. That dead gap is what made the
+            # transitions feel abrupt.
+            next_event_start = max(0.0, lines[i + 1].start - lead_in)
+            event_end = next_event_start + crossfade
+        else:
+            event_end = line.end + final_linger
+
+        # Never let the line vanish right after its last syllable — give
+        # the singer a beat, even when the next line's event_start beats
+        # us to it (close-together phrases).
+        event_end = max(event_end, line.end + min_hold_after)
 
         if event_end <= event_start:
             event_end = event_start + 0.2
 
         text = _line_text(line, event_start)
-        # subtle fade so lines pulse in/out with the music
-        text = f"{{\\fad(200,150)}}" + text
+        # Fade-out duration is matched to the crossfade window so the
+        # outgoing line is ~fully transparent by the time the incoming
+        # line has finished fading in.
+        text = f"{{\\fad(200,{fade_out_ms})}}" + text
         events.append(
             f"Dialogue: 0,{_ass_time(event_start)},{_ass_time(event_end)},Karaoke,,0,0,0,,{text}"
         )
