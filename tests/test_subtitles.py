@@ -122,38 +122,59 @@ def test_short_title_keeps_base_font(tmp_path: Path) -> None:
     assert "\\fs" not in title_body
 
 
-def test_title_card_holds_through_long_instrumental_intro(tmp_path: Path) -> None:
-    """Long intros keep the title on screen right up to the first lyric.
+def test_title_card_persists_through_the_whole_performance(tmp_path: Path) -> None:
+    """Title stays up from t=0 until the last lyric's event ends.
 
-    Previously the title card ended at ``min(title_duration, first_lyric
-    - 0.2)`` which meant it vanished 3 s in even for songs with a 15 s
-    intro. The fix: hold until the first lyric's event appears.
+    Because the title is top-left-anchored and lyrics are bottom-center,
+    the two never share pixels. Leaving the title on screen the whole
+    time gives the singer a persistent "what song am I on" reference.
     """
+    lines = [
+        _line(("first", 2.0, 2.5)),
+        _line(("last", 30.0, 30.8)),
+    ]
     out = tmp_path / "lyrics.ass"
-    build_ass(
-        [_line(("a", 15.0, 15.4))],
-        out,
-        title="Doctor Worm",
-        lead_in=0.6,
-        title_duration=3.0,
-        crossfade=0.3,
-    )
+    build_ass(lines, out, title="Doctor Worm", final_linger=1.5)
 
     title_event = [l for l in out.read_text().splitlines() if ",Title,," in l][0]
     end_time = _ass_time_to_seconds(title_event.split(",")[2])
-    # First lyric event appears at 15 - 0.6 = 14.4s; title extends to 14.4 + 0.3.
-    assert end_time == pytest.approx(14.7, abs=0.05)
+    # Ends with the final lyric's event end: last.end + final_linger.
+    assert end_time == pytest.approx(30.8 + 1.5, abs=0.05)
 
 
-def test_title_card_respects_min_duration_when_intro_is_short(tmp_path: Path) -> None:
-    """If the intro is shorter than title_duration the card still gets its floor."""
+def test_credit_persists_for_the_same_span_as_the_title(tmp_path: Path) -> None:
+    """The Artist/Album block sticks around as long as the title does."""
+    lines = [_line(("first", 2.0, 2.5)), _line(("last", 20.0, 20.5))]
     out = tmp_path / "lyrics.ass"
     build_ass(
-        [_line(("a", 1.0, 1.5))],
+        lines, out,
+        title="Doctor Worm",
+        artist="They Might Be Giants",
+        album="John Henry",
+        final_linger=1.5,
+    )
+
+    dialogues = out.read_text().splitlines()
+    title_end = _ass_time_to_seconds(
+        [l for l in dialogues if ",Title,," in l][0].split(",")[2]
+    )
+    credit_end = _ass_time_to_seconds(
+        [l for l in dialogues if ",Credit,," in l][0].split(",")[2]
+    )
+    assert title_end == pytest.approx(credit_end, abs=0.01)
+
+
+def test_title_duration_acts_as_floor_for_very_short_songs(tmp_path: Path) -> None:
+    """A lyric-less or tiny song still gets a readable title card."""
+    out = tmp_path / "lyrics.ass"
+    # Just one short word — performance ends at 1.5s, but the title_duration
+    # floor (3.0s) should keep the card on screen long enough to read.
+    build_ass(
+        [_line(("hi", 1.0, 1.5))],
         out,
         title="Doctor Worm",
-        lead_in=0.6,
         title_duration=3.0,
+        final_linger=0.3,   # small linger so the lyric itself doesn't push past
     )
 
     title_event = [l for l in out.read_text().splitlines() if ",Title,," in l][0]

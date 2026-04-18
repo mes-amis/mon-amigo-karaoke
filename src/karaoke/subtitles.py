@@ -150,9 +150,10 @@ def build_ass(
     Args:
         lead_in: seconds the line appears on screen before its first word
             is sung — the singer's reading-ahead preview.
-        title_duration: minimum seconds to show the title card. Songs
-            with a long instrumental intro keep the card visible right
-            up to the first lyric — this number is the floor, not a cap.
+        title_duration: minimum seconds to show the title card. The
+            card normally stays up for the entire performance and fades
+            out with the last lyric — this floor just keeps very short
+            songs (or lyric-less renders) from flashing the title.
         crossfade: seconds of overlap between the outgoing line and the
             incoming line. During this window both lines are visible, with
             the outgoing one fading out while the incoming one fades in,
@@ -166,12 +167,12 @@ def build_ass(
 
     if title:
         if lines:
-            first_event_start = max(0.0, lines[0].start - lead_in)
-            # Hold the title until the first lyric's event appears (with a
-            # tiny crossfade overlap), or ``title_duration``, whichever is
-            # longer. Before this change the title blinked out 3 s in even
-            # when the instrumental intro ran for 15 s.
-            title_end = max(title_duration, first_event_start + crossfade)
+            # The title sits at top-left and lyrics sit at bottom-center,
+            # so there's no positional conflict — we keep the title up for
+            # the whole performance and fade it out with the last lyric.
+            # This gives the singer a persistent reference of what song
+            # they're performing.
+            title_end = max(title_duration, lines[-1].end + final_linger)
         else:
             title_end = title_duration
 
