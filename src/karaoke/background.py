@@ -9,7 +9,9 @@ def create_synthwave_background(out: Path, size: tuple[int, int] = (1920, 1080))
     from PIL import Image, ImageDraw, ImageFilter
 
     w, h = size
-    horizon_y = int(h * 0.58)
+    # Horizon at 50% of frame height — keeps the sun in the upper half so
+    # the lower half stays a dark, mostly-even zone for karaoke lyrics.
+    horizon_y = int(h * 0.50)
 
     img = Image.new("RGB", (w, h), (6, 2, 24))
     draw = ImageDraw.Draw(img, "RGBA")
