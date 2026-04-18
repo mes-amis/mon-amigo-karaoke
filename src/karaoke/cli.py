@@ -26,6 +26,22 @@ def _safe_filename(name: str) -> str:
     return "".join("_" if c in bad else c for c in name).strip() or "karaoke"
 
 
+def _output_path_for(song: Song, output_arg: Path | None, all_mode: bool) -> Path:
+    """Pick an output path for one song.
+
+    - Single song, no ``--output``: default dir + ``<title>.mp4``.
+    - Single song, with ``--output``: that exact file path.
+    - ``--all``, no ``--output``: default dir + ``<title>.mp4`` per song.
+    - ``--all``, with ``--output``: ``--output`` is treated as a directory.
+    """
+    if output_arg is not None:
+        base = Path(output_arg).expanduser()
+        if all_mode:
+            return (base / f"{_safe_filename(song.title)}.mp4").resolve()
+        return base.resolve()
+    return (DEFAULT_OUTPUT_DIR / f"{_safe_filename(song.title)}.mp4").resolve()
+
+
 def _match_song(songs: list[Song], query: str) -> Song:
     q = query.strip().lower()
     matches = [s for s in songs if q in s.title.lower()]
@@ -130,7 +146,23 @@ def main() -> None:
         "--keep-intermediate", action="store_true",
         help="Save the generated background PNG, mix WAV, and ASS file alongside the video.",
     )
+    ap.add_argument(
+        "--all", action="store_true",
+        help="Render every song found in the stems folder. Any song whose "
+             "output MP4 already exists is skipped (use --rebuild to force). "
+             "Incompatible with --song. When combined with --output, the "
+             "argument is treated as the output directory rather than a file.",
+    )
+    ap.add_argument(
+        "--rebuild", action="store_true",
+        help="Overwrite existing output MP4s that would otherwise be skipped "
+             "(only meaningful with --all; single-song runs always overwrite).",
+    )
     args = ap.parse_args()
+
+    if args.all and args.song:
+        print("error: --all and --song are mutually exclusive", file=sys.stderr)
+        sys.exit(2)
 
     try:
         songs = find_songs(args.folder)
@@ -146,17 +178,51 @@ def main() -> None:
         )
         sys.exit(2)
 
-    try:
-        if args.song:
-            song = _match_song(songs, args.song)
-        elif len(songs) == 1:
-            song = songs[0]
-        else:
-            song = _prompt_for_song(songs)
-    except (ValueError, RuntimeError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        sys.exit(2)
+    if args.all:
+        target_songs = songs
+    else:
+        try:
+            if args.song:
+                song = _match_song(songs, args.song)
+            elif len(songs) == 1:
+                song = songs[0]
+            else:
+                song = _prompt_for_song(songs)
+        except (ValueError, RuntimeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            sys.exit(2)
+        target_songs = [song]
 
+    if args.all:
+        print(f"[karaoke] batch mode: {len(target_songs)} song(s) in folder")
+
+    processed = 0
+    skipped = 0
+    for song in target_songs:
+        out_path = _output_path_for(song, args.output, args.all)
+
+        # Skip already-rendered songs in batch mode unless the user asked
+        # for a rebuild. Single-song runs always overwrite (matches the
+        # iterate-on-visuals workflow the tool was originally built for).
+        if args.all and out_path.exists() and not args.rebuild:
+            print(
+                f"[karaoke] skip:    {song.title} — already rendered at "
+                f"{out_path} (pass --rebuild to force)"
+            )
+            skipped += 1
+            continue
+
+        _process_song(song, args, out_path)
+        processed += 1
+
+    if args.all:
+        print(
+            f"[karaoke] batch done: {processed} rendered, {skipped} skipped"
+        )
+
+
+def _process_song(song: Song, args: argparse.Namespace, out_path: Path) -> None:
+    """Run the full mix → transcribe → subtitles → render pipeline for one song."""
     stems = song.stems
     title = song.title
     meta = resolve_metadata(
@@ -164,9 +230,6 @@ def main() -> None:
         artist_override=args.artist,
         album_override=args.album,
     )
-    out_path = (
-        args.output or DEFAULT_OUTPUT_DIR / f"{_safe_filename(title)}.mp4"
-    ).expanduser().resolve()
 
     print(f"[karaoke] song:    {title}")
     if meta["artist"] or meta["album"]:
@@ -216,7 +279,7 @@ def main() -> None:
             print(f"[karaoke] artifacts kept in {artifacts}")
 
     dt = time.monotonic() - t0
-    print(f"[karaoke] done in {dt:.1f}s -> {out_path}")
+    print(f"[karaoke] done in {dt:.1f}s -> {out_path}\n")
 
 
 if __name__ == "__main__":
