@@ -36,8 +36,22 @@
 </div>
 
 <% if admin? %>
+  <div class="stage-arm" id="stageArm" hidden>
+    <button class="primary stage-arm-btn" id="stageArmBtn" type="button">
+      Tap to ready stage
+    </button>
+    <p class="stage-arm-hint">
+      Browsers block autoplay without a click. Tap once and every song you
+      start from /admin will play automatically.
+    </p>
+  </div>
+
   <div class="stage-player" id="stagePlayer" hidden>
-    <video id="stageVideo" playsinline controls></video>
+    <video id="stageVideo" playsinline controls autoplay></video>
+    <button class="stage-play-overlay" id="stagePlayOverlay" type="button" hidden>
+      <span class="sp-overlay-icon">▶</span>
+      <span class="sp-overlay-text">Tap to play</span>
+    </button>
     <div class="stage-player-bar">
       <div class="sp-meta">
         <div class="sp-performer" id="spPerformer">—</div>

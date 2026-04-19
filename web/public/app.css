@@ -125,6 +125,33 @@ form.inline { display: inline-block; }
 
 .filter { margin: 8px 0 12px; }
 
+.search-results {
+  display: flex; flex-direction: column; gap: 14px;
+  margin-top: 10px;
+}
+.search-results.searching { opacity: 0.6; }
+.search-section-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.source-library { color: var(--ok); }
+.source-local   { color: var(--accent-2); }
+.source-catalog { color: var(--warn); }
+.source-preparing { color: var(--warn); }
+
+.pick-list { list-style: none; margin: 0; padding: 0; }
+.pick-meta { min-width: 0; flex: 1; }
+.pick-error {
+  color: var(--danger);
+  margin-top: 4px;
+}
+.pick-error[hidden] { display: none; }
+.pick-status { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+
 .song-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .song-list.compact .song-row { padding: 8px 12px; }
 .song-row {
@@ -197,6 +224,31 @@ form.inline { display: inline-block; }
 .admin-table th { color: var(--muted); font-weight: 600; }
 .admin-table tr.state-performing { background: rgba(255,212,71,0.08); }
 .admin-table .actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.admin-error {
+  margin-top: 6px;
+  color: var(--danger);
+  max-width: 420px;
+  overflow-wrap: anywhere;
+}
+.admin-fix-form {
+  margin-top: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+  max-width: 480px;
+}
+.fix-path {
+  background: var(--bg-elev);
+  border: 1px solid var(--card-border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: 13px "SF Mono", ui-monospace, monospace;
+  width: 100%;
+}
+.fix-path:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255,62,168,0.2);
+}
 
 /* ===== stage ===== */
 .stage-page {
@@ -324,6 +376,59 @@ form.inline { display: inline-block; }
   cursor: not-allowed;
   filter: grayscale(0.4);
   box-shadow: none;
+}
+
+.stage-arm {
+  position: fixed;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 900;
+  background: rgba(11,10,30,0.92);
+  border: 1px solid var(--accent);
+  border-radius: 18px;
+  padding: 36px 40px;
+  box-shadow: 0 0 60px rgba(255,62,168,0.5), 0 20px 60px rgba(0,0,0,0.7);
+  text-align: center;
+  max-width: 540px;
+  backdrop-filter: blur(6px);
+}
+.stage-arm[hidden] { display: none; }
+.stage-arm-btn {
+  font-size: 22px;
+  padding: 18px 32px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.stage-arm-hint {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 16px 0 0;
+  line-height: 1.5;
+}
+
+.stage-play-overlay {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(255,62,168,0.28), rgba(0,0,0,0.88));
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 18px;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  z-index: 10;
+}
+.stage-play-overlay[hidden] { display: none; }
+.sp-overlay-icon {
+  font-size: 96px;
+  line-height: 1;
+  text-shadow: 0 0 40px rgba(255,62,168,0.8);
+}
+.sp-overlay-text {
+  font-size: 24px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
 }
 
 .stage-player {

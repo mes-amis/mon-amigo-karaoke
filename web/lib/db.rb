@@ -39,12 +39,16 @@ module KaraokeWeb
             artist TEXT,
             album TEXT,
             video_path TEXT,
+            audio_path TEXT,
             status TEXT NOT NULL DEFAULT 'ready',
             error TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
           )
         SQL
+        # Back-fill audio_path on pre-existing DBs.
+        have_audio_path = c.execute("PRAGMA table_info(songs)").any? { |r| r["name"] == "audio_path" }
+        c.execute("ALTER TABLE songs ADD COLUMN audio_path TEXT") unless have_audio_path
         c.execute <<~SQL
           CREATE UNIQUE INDEX IF NOT EXISTS songs_title_idx
             ON songs(title)
@@ -72,20 +76,22 @@ module KaraokeWeb
         row["next"] || 1
       end
 
-      def upsert_song(title:, artist: nil, album: nil, video_path: nil, status: "ready")
+      def upsert_song(title:, artist: nil, album: nil, video_path: nil, audio_path: nil, status: "ready")
         c = connection
         existing = c.get_first_row("SELECT * FROM songs WHERE title = ?", [title])
         if existing
           c.execute(
             "UPDATE songs SET artist = COALESCE(?, artist), album = COALESCE(?, album), " \
-            "video_path = COALESCE(?, video_path), status = ?, updated_at = datetime('now') WHERE id = ?",
-            [artist, album, video_path, status, existing["id"]]
+            "video_path = COALESCE(?, video_path), audio_path = COALESCE(?, audio_path), " \
+            "status = ?, updated_at = datetime('now') WHERE id = ?",
+            [artist, album, video_path, audio_path, status, existing["id"]]
           )
           existing["id"]
         else
           c.execute(
-            "INSERT INTO songs(title, artist, album, video_path, status) VALUES (?, ?, ?, ?, ?)",
-            [title, artist, album, video_path, status]
+            "INSERT INTO songs(title, artist, album, video_path, audio_path, status) " \
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [title, artist, album, video_path, audio_path, status]
           )
           c.last_insert_row_id
         end

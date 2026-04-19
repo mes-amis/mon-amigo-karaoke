@@ -51,12 +51,32 @@
             <td>
               <span class="tag song-<%= h(q["song_status"]) %>"><%= h(q["song_status"]) %></span>
               <span class="tag state-<%= h(q["state"]) %>"><%= h(q["state"]) %></span>
+              <% if q["song_status"] == "failed" && q["error"] && !q["error"].empty? %>
+                <div class="admin-error small"><%= h(q["error"]) %></div>
+                <form method="post" action="/admin/fix/<%= q["song_id"] %>" class="admin-fix-form">
+                  <label class="small muted" for="fix-path-<%= q["song_id"] %>">
+                    Path to audio file:
+                  </label>
+                  <input id="fix-path-<%= q["song_id"] %>" name="path" type="text"
+                         class="fix-path small" spellcheck="false" autocomplete="off"
+                         placeholder="/Users/.../Artist/Album/01 Song.m4a">
+                  <button class="primary small" type="submit">Fix &amp; render</button>
+                </form>
+              <% end %>
             </td>
             <td class="actions">
-              <% if q["state"] != "performing" %>
+              <% if q["song_status"] == "ready" && q["state"] != "performing" %>
                 <form method="post" action="/admin/start/<%= q["id"] %>" class="inline"><button class="primary small">start</button></form>
-              <% else %>
+              <% elsif q["state"] == "performing" %>
                 <form method="post" action="/admin/done/<%= q["id"] %>" class="inline"><button class="primary small">done</button></form>
+              <% elsif q["song_status"] == "failed" %>
+                <form method="post" action="/admin/retry/<%= q["song_id"] %>" class="inline"><button class="primary small">retry</button></form>
+                <form method="post" action="/admin/delete-song/<%= q["song_id"] %>" class="inline"
+                      onsubmit="return confirm('Delete \\'<%= h(q["title"]) %>\\' and any queue entries for it?');">
+                  <button class="link danger small">delete song</button>
+                </form>
+              <% else %>
+                <span class="tag song-<%= h(q["song_status"]) %>"><%= h(q["song_status"]) %>…</span>
               <% end %>
               <form method="post" action="/admin/skip/<%= q["id"] %>" class="inline"><button class="link small">skip</button></form>
               <form method="post" action="/admin/remove/<%= q["id"] %>" class="inline"><button class="link danger small">remove</button></form>

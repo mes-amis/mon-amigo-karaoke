@@ -1,12 +1,19 @@
-<% if @my_picks.any? %>
-  <section class="card">
-    <h2>Your turn</h2>
+<% has_failed_pick = @my_picks.any? { |p| p["song_status"] == "failed" } %>
+<% has_performing = @my_picks.any? { |p| p["state"] == "performing" } %>
+<% hide_search_on_load = @my_picks.any? && !has_failed_pick %>
+
+<section class="card" id="myPicksCard" <%= "hidden" if @my_picks.empty? %>>
+  <h2>Your turn</h2>
+  <ul class="pick-list" id="myPicksList">
     <% @my_picks.each do |p| %>
-      <div class="pick-row">
-        <div>
+      <li class="pick-row" data-pick-id="<%= p["id"] %>">
+        <div class="pick-meta">
           <div class="pick-title"><%= h(p["title"]) %></div>
           <% if p["artist"] && !p["artist"].empty? %>
             <div class="muted"><%= h(p["artist"]) %></div>
+          <% end %>
+          <% if p["song_status"] == "failed" && p["song_error"] %>
+            <div class="pick-error small"><%= h(p["song_error"]) %></div>
           <% end %>
         </div>
         <div class="pick-status">
@@ -15,35 +22,49 @@
           <% else %>
             <span class="tag pending">position #<%= p["position"] %></span>
           <% end %>
+          <span class="tag song-<%= h(p["song_status"]) %>"><%= h(p["song_status"]) %></span>
+          <% if p["state"] != "performing" %>
+            <button class="link small pick-cancel" type="button"
+                    data-cancel-label="<%= p["song_status"] == "failed" ? "Pick a different song" : "Cancel" %>">
+              <%= p["song_status"] == "failed" ? "Pick a different song" : "Cancel" %>
+            </button>
+          <% end %>
         </div>
-      </div>
+      </li>
     <% end %>
-  </section>
-<% end %>
+  </ul>
+</section>
 
-<section class="card">
+<section class="card" id="searchCard" <%= "hidden" if hide_search_on_load %>>
   <h2>Pick a song</h2>
-  <% if @my_picks.any? %>
-    <p class="muted">You can pick another once you've finished your current turn.</p>
-  <% else %>
-    <p class="muted"><%= @songs.length %> song<%= "s" unless @songs.length == 1 %> ready to go.</p>
-    <input class="filter" id="songFilter" type="search" placeholder="filter songs..." autocomplete="off">
-    <ul class="song-list" id="songList">
-      <% @songs.each do |s| %>
-        <li class="song-row" data-search="<%= h([s["title"], s["artist"], s["album"]].compact.join(" ").downcase) %>">
-          <div class="song-meta">
-            <div class="song-title"><%= h(s["title"]) %></div>
-            <% credit = [s["artist"], s["album"]].reject { |x| x.to_s.empty? }.join(" — ") %>
-            <% unless credit.empty? %>
-              <div class="muted"><%= h(credit) %></div>
-            <% end %>
-          </div>
-          <form method="post" action="/pick" class="inline">
-            <input type="hidden" name="song_id" value="<%= s["id"] %>">
-            <button class="primary small" type="submit">Pick</button>
-          </form>
-        </li>
-      <% end %>
-    </ul>
-  <% end %>
+  <p class="muted">
+    Search your library or anything in iTunes. Already-downloaded songs sort
+    first; catalog picks trigger a Music.app download (usually ~1–2 minutes).
+  </p>
+  <input class="filter" id="songSearch" type="search"
+         placeholder="search title, artist, or album..."
+         autocomplete="off" autofocus>
+  <div id="searchResults" class="search-results">
+    <% unless @songs.empty? %>
+      <div class="search-section-label">Ready / downloaded (fastest)</div>
+      <ul class="song-list">
+        <% @songs.first(12).each do |s| %>
+          <li class="song-row" data-search="<%= h([s["title"], s["artist"], s["album"]].compact.join(" ").downcase) %>">
+            <div class="song-meta">
+              <div class="song-title"><%= h(s["title"]) %></div>
+              <% credit = [s["artist"], s["album"]].reject { |x| x.to_s.empty? }.join(" — ") %>
+              <% unless credit.empty? %>
+                <div class="muted"><%= h(credit) %></div>
+              <% end %>
+              <div class="muted small source-library">ready to sing now</div>
+            </div>
+            <form method="post" action="/pick" class="inline">
+              <input type="hidden" name="song_id" value="<%= s["id"] %>">
+              <button class="primary small" type="submit">Pick</button>
+            </form>
+          </li>
+        <% end %>
+      </ul>
+    <% end %>
+  </div>
 </section>
