@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Verify GENIUS_ACCESS_TOKEN works against the Genius API.
+
+Runs the same lyricsgenius call the karaoke pipeline uses and reports
+clearly where in the chain something fails: missing env var, missing
+package, bad token, song-not-found, network, etc. Never prints the
+token itself.
+
+Usage:
+    ./bin/verify-genius
+    ./bin/verify-genius "Doctor Worm" "They Might Be Giants"
+"""
+
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+# Re-exec under the venv interpreter so lyricsgenius is importable
+# without the user having to activate the venv.
+_VENV = os.path.join(ROOT, ".venv")
+_VENV_PY = os.path.join(_VENV, "bin", "python3")
+if (
+    os.path.isfile(_VENV_PY)
+    and os.path.realpath(sys.prefix) != os.path.realpath(_VENV)
+):
+    os.execv(_VENV_PY, [_VENV_PY, __file__, *sys.argv[1:]])
+
+sys.path.insert(0, os.path.join(ROOT, "src"))
+
+
+def _ok(msg: str) -> None:
+    print(f"  ok:   {msg}")
+
+
+def _fail(msg: str) -> None:
+    print(f"  FAIL: {msg}")
+
+
+def main() -> None:
+    title = sys.argv[1] if len(sys.argv) > 1 else "Doctor Worm"
+    artist = sys.argv[2] if len(sys.argv) > 2 else "They Might Be Giants"
+
+    print("[verify-genius] environment")
+    token = os.environ.get("GENIUS_ACCESS_TOKEN")
+    if not token:
+        _fail("GENIUS_ACCESS_TOKEN is not set in this shell")
+        print()
+        print("  Get a token: https://genius.com/api-clients (free; create a")
+        print("  client and copy the 'Client Access Token').")
+        print()
+        print("  Store it in 1Password, then load it via the `op` CLI:")
+        print('    export GENIUS_ACCESS_TOKEN="$(op read \'op://<vault>/<item>/credential\')"')
+        sys.exit(1)
+    # Don't echo the token, just acknowledge it's there.
+    _ok("GENIUS_ACCESS_TOKEN is set")
+
+    print()
+    print("[verify-genius] dependency")
+    try:
+        import lyricsgenius
+    except ModuleNotFoundError:
+        _fail("lyricsgenius is not installed in the venv")
+        print("  Run: ./bin/setup")
+        sys.exit(1)
+    try:
+        from importlib.metadata import version as _pkg_version
+        version = _pkg_version("lyricsgenius")
+    except Exception:
+        version = "?"
+    _ok(f"lyricsgenius {version}")
+
+    print()
+    print(f"[verify-genius] searching Genius for {title!r} by {artist!r}")
+    try:
+        genius = lyricsgenius.Genius(
+            token,
+            remove_section_headers=True,
+            skip_non_songs=True,
+            timeout=10,
+            retries=1,
+        )
+        if hasattr(genius, "verbose"):
+            genius.verbose = False
+        song = genius.search_song(title, artist)
+    except Exception as exc:
+        _fail(f"API call raised {type(exc).__name__}: {exc}")
+        message = str(exc).lower()
+        if "401" in message or "unauthorized" in message or "invalid" in message:
+            print("  -> Token rejected. Check the value in 1Password and")
+            print("     re-export it before retrying.")
+        elif "429" in message or "rate" in message:
+            print("  -> Rate-limited. Wait a minute and try again.")
+        elif "timeout" in message or "connection" in message or "resolve" in message:
+            print("  -> Network problem reaching api.genius.com.")
+        sys.exit(1)
+
+    if song is None:
+        _fail(f"no Genius match for {title!r} by {artist!r}")
+        print("  -> Token works (the search itself succeeded), but Genius")
+        print("     returned no song. Try a different title/artist.")
+        sys.exit(1)
+
+    lyrics = (song.lyrics or "").strip()
+    if not lyrics:
+        _fail("Genius returned a song page but the lyrics body was empty")
+        sys.exit(1)
+
+    line_count = sum(1 for ln in lyrics.splitlines() if ln.strip())
+    _ok(f"got {line_count} non-blank lyric lines "
+        f"for '{song.title}' by '{song.artist}'")
+
+    print()
+    print("  First few lines:")
+    shown = 0
+    for line in lyrics.splitlines():
+        if not line.strip():
+            continue
+        print(f"    {line}")
+        shown += 1
+        if shown >= 6:
+            break
+
+    print()
+    print("[verify-genius] all good — `bin/karaoke` will run the Genius")
+    print("                correction pass on every song from now on.")
+
+
+if __name__ == "__main__":
+    main()

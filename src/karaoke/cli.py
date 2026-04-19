@@ -10,9 +10,12 @@ import time
 from pathlib import Path
 
 from .background import create_synthwave_background
+from .itunes import find_local_audio, iTunesTrack, prompt_pick_metadata, prompt_pick_track
+from .lyrics import align_words, fetch_lyrics
 from .metadata import resolve_metadata
 from .mix import mix_stems
 from .render import render_video
+from .separate import DEFAULT_MODEL as DEMUCS_MODEL, is_audio_file, separate
 from .stems import Song, find_songs
 from .subtitles import build_ass
 from .transcribe import group_into_lines, transcribe
@@ -96,8 +99,12 @@ def main() -> None:
         description="Build a synthwave karaoke video from a folder of Ableton Live stems.",
     )
     ap.add_argument(
-        "folder", type=Path,
-        help="Folder containing stems named like 'Song (Vocals).aif', '... (Bass).aif', etc.",
+        "input", type=Path, nargs="?",
+        help="Either a folder of Ableton stems (e.g. 'Song (Vocals).aif') "
+             "or a mixed audio file (.mp3/.wav/.flac/.m4a/.aif/.aiff). "
+             "If a file is given we auto-stem it with Demucs (htdemucs_6s). "
+             "Optional when --itunes is used: an iTunes search picks the "
+             "song and we look it up in your Music.app library.",
     )
     ap.add_argument(
         "-o", "--output", type=Path,
@@ -117,6 +124,19 @@ def main() -> None:
     ap.add_argument(
         "--album", default=None,
         help="Override the album credit shown on the title card.",
+    )
+    ap.add_argument(
+        "--itunes", action="store_true",
+        help="Before rendering each song, prompt for an iTunes Search "
+             "and pick artist/album from the results. Explicit "
+             "--artist/--album flags still win.",
+    )
+    ap.add_argument(
+        "--no-genius", action="store_true",
+        help="Skip the Genius lyrics correction pass. By default, when "
+             "GENIUS_ACCESS_TOKEN is set in the environment, we fetch "
+             "canonical lyrics from genius.com and re-align Whisper's "
+             "word timings onto them, fixing mis-transcriptions.",
     )
     ap.add_argument(
         "--model", default="medium.en",
@@ -164,35 +184,122 @@ def main() -> None:
         print("error: --all and --song are mutually exclusive", file=sys.stderr)
         sys.exit(2)
 
-    try:
-        songs = find_songs(args.folder)
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    # iTunes-as-input mode: no positional, --itunes is the input source.
+    itunes_track: iTunesTrack | None = None
+    if args.input is None:
+        if not args.itunes:
+            ap.error(
+                "input is required (a stems folder or audio file), "
+                "or pass --itunes to search and pick a song interactively."
+            )
+        if args.all or args.song:
+            print(
+                "error: --all and --song don't apply to --itunes input "
+                "(it picks exactly one song).",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+        track = prompt_pick_track(skip_label="cancel")
+        if track is None:
+            print("[karaoke] no track picked — exiting.", file=sys.stderr)
+            sys.exit(0)
+        local = find_local_audio(track)
+        if local is None:
+            print(
+                f"error: '{track.title}' by {track.artist} isn't downloaded "
+                "in your Music.app library (cloud-only tracks have no "
+                "local file). Download it from Music.app, or pass an "
+                "explicit audio file path instead.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        print(f"[karaoke] iTunes pick: {track.title} — {track.artist} — {track.album}")
+        print(f"[karaoke] found in library: {local}")
+        try:
+            print(
+                f"[karaoke] separating stems with Demucs ({DEMUCS_MODEL})..."
+            )
+            raw = separate(local)
+        except (FileNotFoundError, ValueError, RuntimeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            sys.exit(2)
+        # iTunes title is canonical — replaces whatever the filename was.
+        target_songs = [Song(base=raw.base, title=track.title, stems=raw.stems)]
+        itunes_track = track
+
+        # Skip the rest of the input-routing block; jump straight to render.
+        _run_targets(args, target_songs, itunes_track=itunes_track)
+        return
+
+    input_path = args.input.expanduser()
+    if not input_path.exists():
+        print(f"error: input not found: {input_path}", file=sys.stderr)
         sys.exit(2)
 
-    if not songs:
+    if is_audio_file(input_path):
+        # Single mixed audio file → Demucs auto-stem path.
+        if args.all or args.song:
+            print(
+                "error: --all and --song only apply when the input is a "
+                "stems folder, not an audio file.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        try:
+            print(
+                f"[karaoke] separating stems with Demucs ({DEMUCS_MODEL}) — "
+                "this takes ~30-60s on first run, cached after that..."
+            )
+            target_songs = [separate(input_path)]
+        except (FileNotFoundError, ValueError, RuntimeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            sys.exit(2)
+    elif input_path.is_dir():
+        try:
+            songs = find_songs(input_path)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            sys.exit(2)
+
+        if not songs:
+            print(
+                f"error: no complete stem sets found in {input_path}.\n"
+                "Expected files named like 'Song (Vocals).aif', '... (Bass).aif', etc.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+        if args.all:
+            target_songs = songs
+        else:
+            try:
+                if args.song:
+                    song = _match_song(songs, args.song)
+                elif len(songs) == 1:
+                    song = songs[0]
+                else:
+                    song = _prompt_for_song(songs)
+            except (ValueError, RuntimeError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                sys.exit(2)
+            target_songs = [song]
+    else:
         print(
-            f"error: no complete stem sets found in {args.folder}.\n"
-            "Expected files named like 'Song (Vocals).aif', '... (Bass).aif', etc.",
+            f"error: {input_path} is not a folder of stems or a "
+            "supported audio file (.mp3/.wav/.flac/.m4a/.aif/.aiff).",
             file=sys.stderr,
         )
         sys.exit(2)
 
-    if args.all:
-        target_songs = songs
-    else:
-        try:
-            if args.song:
-                song = _match_song(songs, args.song)
-            elif len(songs) == 1:
-                song = songs[0]
-            else:
-                song = _prompt_for_song(songs)
-        except (ValueError, RuntimeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            sys.exit(2)
-        target_songs = [song]
+    _run_targets(args, target_songs)
 
+
+def _run_targets(
+    args: argparse.Namespace,
+    target_songs: list[Song],
+    itunes_track: iTunesTrack | None = None,
+) -> None:
     if args.all:
         print(f"[karaoke] batch mode: {len(target_songs)} song(s) in folder")
 
@@ -212,7 +319,7 @@ def main() -> None:
             skipped += 1
             continue
 
-        _process_song(song, args, out_path)
+        _process_song(song, args, out_path, itunes_track=itunes_track)
         processed += 1
 
     if args.all:
@@ -221,14 +328,34 @@ def main() -> None:
         )
 
 
-def _process_song(song: Song, args: argparse.Namespace, out_path: Path) -> None:
+def _process_song(
+    song: Song,
+    args: argparse.Namespace,
+    out_path: Path,
+    itunes_track: iTunesTrack | None = None,
+) -> None:
     """Run the full mix → transcribe → subtitles → render pipeline for one song."""
     stems = song.stems
     title = song.title
+
+    # Resolve credits in priority order:
+    #   CLI flags > iTunes (already-picked or interactive) > Music.app > empty
+    itunes_artist = itunes_album = None
+    if itunes_track is not None:
+        # iTunes was the input source — we already picked the track.
+        itunes_artist = itunes_track.artist or None
+        itunes_album = itunes_track.album or None
+    elif args.itunes and (not args.artist or not args.album):
+        # iTunes is augmenting a folder/file input; prompt now.
+        picked = prompt_pick_metadata(title)
+        if picked:
+            itunes_artist = picked.get("artist") or None
+            itunes_album = picked.get("album") or None
+
     meta = resolve_metadata(
         title,
-        artist_override=args.artist,
-        album_override=args.album,
+        artist_override=args.artist or itunes_artist,
+        album_override=args.album or itunes_album,
     )
 
     print(f"[karaoke] song:    {title}")
@@ -248,6 +375,26 @@ def _process_song(song: Song, args: argparse.Namespace, out_path: Path) -> None:
 
         print(f"[karaoke] transcribing vocals (whisper {args.model})...")
         words = transcribe(stems["Vocals"], model_name=args.model, language=args.language)
+
+        # Optional Genius correction pass — fix Whisper mis-transcriptions
+        # by re-aligning timings onto the canonical lyrics. Silent no-op
+        # when GENIUS_ACCESS_TOKEN isn't set or the song isn't on Genius.
+        if not args.no_genius and meta["artist"]:
+            print("[karaoke] fetching lyrics from Genius for correction...")
+            lyrics = fetch_lyrics(title, meta["artist"])
+            if lyrics:
+                before = len(words)
+                words = align_words(words, lyrics)
+                print(
+                    f"[karaoke] aligned Whisper timings to Genius lyrics "
+                    f"({before} -> {len(words)} words)"
+                )
+            else:
+                print(
+                    "[karaoke] no Genius match (or no GENIUS_ACCESS_TOKEN); "
+                    "keeping Whisper transcription as-is"
+                )
+
         lines = group_into_lines(words)
         print(f"[karaoke] {len(words)} words grouped into {len(lines)} lines")
 

@@ -94,8 +94,26 @@ pip install -r "$ROOT/requirements.txt"
 
 # --- 4. Whisper weights -----------------------------------------------------
 if [[ $SKIP_MODEL -eq 1 ]]; then
-  say "skipping Whisper weight download (--no-model)"
+  say "skipping Whisper / Demucs model downloads (--no-model)"
 else
+  say "pre-downloading Demucs model: htdemucs_6s (~250 MB)"
+  python - <<'PY'
+import sys
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+try:
+    from demucs.pretrained import get_model
+    get_model("htdemucs_6s")
+    print("[setup] cached htdemucs_6s under ~/.cache/torch/hub/checkpoints")
+except Exception as exc:
+    print(f"[setup] warning: could not pre-download Demucs model ({exc!r}); "
+          "first karaoke run on an audio file will download it then.",
+          file=sys.stderr)
+PY
+
   say "pre-downloading Whisper model: ${MODEL}"
   # truststore teaches Python's stdlib ssl module to use the macOS Keychain,
   # which is the only way Whisper's download works behind a corporate TLS

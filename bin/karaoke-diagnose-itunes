@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Diagnose why --itunes can't find a downloaded file.
+
+Reports which standard music-folder roots are readable, lists how many
+top-level artist folders each contains, and runs a real filesystem
+search for whatever query you pass (default: ``ophelia``).
+
+Usage:
+    ./bin/karaoke-diagnose-itunes
+    ./bin/karaoke-diagnose-itunes ophelia
+    ./bin/karaoke-diagnose-itunes "doctor worm"
+"""
+
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+# Re-exec under the project venv so imports work without activation.
+_VENV_PY = os.path.join(ROOT, ".venv", "bin", "python3")
+if (
+    os.path.isfile(_VENV_PY)
+    and os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(ROOT, ".venv"))
+):
+    os.execv(_VENV_PY, [_VENV_PY, __file__, *sys.argv[1:]])
+
+sys.path.insert(0, os.path.join(ROOT, "src"))
+
+from karaoke.itunes import (  # noqa: E402
+    DEFAULT_FILESYSTEM_ROOTS,
+    search_filesystem,
+    search_local_library,
+)
+
+
+def main() -> None:
+    query = sys.argv[1] if len(sys.argv) > 1 else "ophelia"
+
+    print("Filesystem roots:")
+    for root in DEFAULT_FILESYSTEM_ROOTS:
+        print(f"  {root}")
+        try:
+            if not root.is_dir():
+                print("    is_dir(): False — skipped")
+                continue
+            entries = list(root.iterdir())
+            print(f"    is_dir(): True — {len(entries)} entries (artists)")
+            if entries:
+                # Show the first three so you can eyeball whether the
+                # folder structure matches our <Artist>/<Album>/<Track>
+                # assumption.
+                for e in entries[:3]:
+                    print(f"      • {e.name}")
+        except PermissionError as exc:
+            print(f"    PermissionError: {exc}")
+            print("    -> Terminal lacks 'Files and Folders' access to "
+                  "this location. Grant it under System Settings → "
+                  "Privacy & Security → Files and Folders.")
+        except OSError as exc:
+            print(f"    OSError: {exc}")
+
+    print()
+    print(f"Filesystem search for {query!r}:")
+    fs_hits = search_filesystem(query)
+    print(f"  {len(fs_hits)} hit(s)")
+    for h in fs_hits[:10]:
+        print(f"  • {h.title!r} — {h.artist!r} / {h.album!r}")
+        print(f"      {h.location}")
+
+    print()
+    print(f"Music.app library search for {query!r}:")
+    lib_hits = search_local_library(query)
+    print(f"  {len(lib_hits)} hit(s)")
+    for h in lib_hits[:10]:
+        print(f"  • {h.title!r} — {h.artist!r} / {h.album!r}")
+        print(f"      {h.location}")
+
+
+if __name__ == "__main__":
+    main()

@@ -12,7 +12,13 @@ def mix_stems(
     include_vocals: bool = False,
     vocals_db: float = -12.0,
 ) -> None:
-    order = [name for name in ("Bass", "Drums", "Others") if name in stems]
+    # Anything that isn't ``Vocals`` is instrumental — this works for
+    # both the Ableton 4-stem layout (Bass/Drums/Others) and Demucs's
+    # 6-stem layout (Bass/Drums/Other/Guitar/Piano), without needing a
+    # hard-coded name list.
+    instrumental_order = sorted(name for name in stems if name != "Vocals")
+
+    order = list(instrumental_order)
     if include_vocals and "Vocals" in stems:
         order.append("Vocals")
 

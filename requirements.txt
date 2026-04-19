@@ -1,5 +1,19 @@
 openai-whisper>=20231117
 Pillow>=10.0
+# Demucs powers the auto-stem path: hand bin/karaoke an MP3/WAV instead
+# of a folder and it splits the file into 6 stems (vocals/drums/bass/
+# guitar/piano/other) for the rest of the pipeline.
+demucs>=4.0
+# torchaudio 2.8+ stopped shipping its own audio writers and now defers
+# to torchcodec for `torchaudio.save()`. Demucs uses that to write each
+# separated stem as a WAV, so without torchcodec the separation step
+# crashes with "TorchCodec is required for save_with_torchcodec".
+torchcodec
+# lyricsgenius pulls canonical lyrics from genius.com; we use it to do
+# a correction pass over Whisper's mis-transcriptions before rendering
+# the karaoke. Optional at runtime — without GENIUS_ACCESS_TOKEN set
+# we just keep the raw Whisper text.
+lyricsgenius>=3.0
 # truststore lets Python's stdlib urllib / ssl use the macOS Keychain,
 # which is required when a corporate proxy (Zscaler, Netskope, etc.) injects
 # a self-signed root CA — without it, whisper.load_model() cannot download
