@@ -109,12 +109,17 @@ module KaraokeWeb
       end
 
       def qr_svg(text)
+        # `viewbox: true` swaps the native width/height attrs for a
+        # `viewBox`, which is what makes CSS width:100% height:auto
+        # actually scale the QR instead of stranding it at its native
+        # module_size × module_count px.
         RQRCode::QRCode.new(text, level: :m).as_svg(
           offset: 0, color: "000",
           shape_rendering: "crispEdges",
           module_size: 6,
           standalone: true,
           use_path: true,
+          viewbox: true,
           svg_attributes: { class: "qr" },
         )
       end
