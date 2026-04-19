@@ -1,0 +1,49 @@
+<% if @my_picks.any? %>
+  <section class="card">
+    <h2>Your turn</h2>
+    <% @my_picks.each do |p| %>
+      <div class="pick-row">
+        <div>
+          <div class="pick-title"><%= h(p["title"]) %></div>
+          <% if p["artist"] && !p["artist"].empty? %>
+            <div class="muted"><%= h(p["artist"]) %></div>
+          <% end %>
+        </div>
+        <div class="pick-status">
+          <% if p["state"] == "performing" %>
+            <span class="tag performing">now performing</span>
+          <% else %>
+            <span class="tag pending">position #<%= p["position"] %></span>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  </section>
+<% end %>
+
+<section class="card">
+  <h2>Pick a song</h2>
+  <% if @my_picks.any? %>
+    <p class="muted">You can pick another once you've finished your current turn.</p>
+  <% else %>
+    <p class="muted"><%= @songs.length %> song<%= "s" unless @songs.length == 1 %> ready to go.</p>
+    <input class="filter" id="songFilter" type="search" placeholder="filter songs..." autocomplete="off">
+    <ul class="song-list" id="songList">
+      <% @songs.each do |s| %>
+        <li class="song-row" data-search="<%= h([s["title"], s["artist"], s["album"]].compact.join(" ").downcase) %>">
+          <div class="song-meta">
+            <div class="song-title"><%= h(s["title"]) %></div>
+            <% credit = [s["artist"], s["album"]].reject { |x| x.to_s.empty? }.join(" — ") %>
+            <% unless credit.empty? %>
+              <div class="muted"><%= h(credit) %></div>
+            <% end %>
+          </div>
+          <form method="post" action="/pick" class="inline">
+            <input type="hidden" name="song_id" value="<%= s["id"] %>">
+            <button class="primary small" type="submit">Pick</button>
+          </form>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</section>

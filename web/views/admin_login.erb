@@ -1,0 +1,9 @@
+<section class="card narrow">
+  <h1>Admin</h1>
+  <% if @error %><p class="error"><%= h(@error) %></p><% end %>
+  <form method="post" action="/admin/login" class="form">
+    <label for="pw">Password</label>
+    <input id="pw" name="password" type="password" autofocus autocomplete="current-password">
+    <button type="submit" class="primary">Sign in</button>
+  </form>
+</section>

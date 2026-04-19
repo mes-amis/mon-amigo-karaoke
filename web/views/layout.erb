@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mon amigo karaoke</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="page">
+  <header class="topbar">
+    <a class="brand" href="/">mon amigo <span class="brand-accent">karaoke</span></a>
+    <nav class="topbar-nav">
+      <% if current_participant %>
+        <span class="who">signed in as <strong><%= h(current_participant["name"]) %></strong></span>
+        <form method="post" action="/signout" class="inline"><button class="link">sign out</button></form>
+      <% end %>
+      <a class="link" href="/stage">stage</a>
+      <% if admin? %>
+        <a class="link" href="/admin">admin</a>
+      <% elsif KaraokeWeb::Auth.configured? %>
+        <a class="link" href="/admin/login">admin</a>
+      <% end %>
+    </nav>
+  </header>
+  <main class="main">
+    <%= yield %>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>

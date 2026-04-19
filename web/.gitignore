@@ -1,0 +1,7 @@
+data/
+tmp/
+*.db
+*.db-wal
+*.db-shm
+.ngrok.log
+.puma.pid

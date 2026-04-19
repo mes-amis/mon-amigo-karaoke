@@ -1,0 +1,92 @@
+<% has_performing = @queue.any? { |q| q["state"] == "performing" } %>
+<% next_pending = @queue.find { |q| q["state"] == "pending" } %>
+
+<section class="card">
+  <div class="row-between">
+    <h1>Queue</h1>
+    <form method="post" action="/admin/rescan" class="inline">
+      <button class="link">rescan videos</button>
+    </form>
+  </div>
+
+  <div class="start-bar">
+    <% if has_performing %>
+      <div class="start-bar-hint">
+        <strong><%= h(@queue.find { |q| q["state"] == "performing" }["participant_name"]) %></strong>
+        is performing <em><%= h(@queue.find { |q| q["state"] == "performing" }["title"]) %></em>.
+      </div>
+      <form method="post" action="/admin/done/<%= @queue.find { |q| q["state"] == "performing" }["id"] %>" class="inline">
+        <button class="primary" type="submit">Finish &amp; advance</button>
+      </form>
+    <% elsif next_pending %>
+      <div class="start-bar-hint">
+        Next up: <strong><%= h(next_pending["participant_name"]) %></strong> —
+        <em><%= h(next_pending["title"]) %></em>
+      </div>
+      <form method="post" action="/admin/start-next" class="inline">
+        <button class="primary" type="submit">Start</button>
+      </form>
+    <% else %>
+      <div class="start-bar-hint muted">Queue is empty.</div>
+    <% end %>
+  </div>
+
+  <% if @queue.empty? %>
+    <p class="muted">No one in the queue yet.</p>
+  <% else %>
+    <table class="admin-table">
+      <thead>
+        <tr><th>#</th><th>Performer</th><th>Song</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        <% @queue.each do |q| %>
+          <tr class="state-<%= h(q["state"]) %>">
+            <td><%= q["position"] %></td>
+            <td><%= h(q["participant_name"]) %></td>
+            <td>
+              <div><%= h(q["title"]) %></div>
+              <% credit = [q["artist"], q["album"]].reject { |x| x.to_s.empty? }.join(" — ") %>
+              <% unless credit.empty? %><div class="muted small"><%= h(credit) %></div><% end %>
+            </td>
+            <td>
+              <span class="tag song-<%= h(q["song_status"]) %>"><%= h(q["song_status"]) %></span>
+              <span class="tag state-<%= h(q["state"]) %>"><%= h(q["state"]) %></span>
+            </td>
+            <td class="actions">
+              <% if q["state"] != "performing" %>
+                <form method="post" action="/admin/start/<%= q["id"] %>" class="inline"><button class="primary small">start</button></form>
+              <% else %>
+                <form method="post" action="/admin/done/<%= q["id"] %>" class="inline"><button class="primary small">done</button></form>
+              <% end %>
+              <form method="post" action="/admin/skip/<%= q["id"] %>" class="inline"><button class="link small">skip</button></form>
+              <form method="post" action="/admin/remove/<%= q["id"] %>" class="inline"><button class="link danger small">remove</button></form>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+</section>
+
+<section class="card">
+  <h2>Songs on disk</h2>
+  <p class="muted"><%= @songs.length %> tracked (<%= @songs.count { |s| s["status"] == "ready" } %> ready).</p>
+  <ul class="song-list compact">
+    <% @songs.each do |s| %>
+      <li class="song-row">
+        <div class="song-meta">
+          <div class="song-title"><%= h(s["title"]) %></div>
+          <% credit = [s["artist"], s["album"]].reject { |x| x.to_s.empty? }.join(" — ") %>
+          <% unless credit.empty? %><div class="muted small"><%= h(credit) %></div><% end %>
+        </div>
+        <span class="tag song-<%= h(s["status"]) %>"><%= h(s["status"]) %></span>
+      </li>
+    <% end %>
+  </ul>
+</section>
+
+<section class="card">
+  <form method="post" action="/admin/logout" class="inline">
+    <button class="link">sign out of admin</button>
+  </form>
+</section>

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Run the minitest suite against the Ruby web package.
+#
+# Usage:
+#   ./web/bin/test                      # all tests
+#   ./web/bin/test test/test_auth.rb    # one file
+#   ./web/bin/test -n /stage/           # filter by test name regex
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+if [[ ! -f Gemfile.lock ]]; then
+  bundle install
+fi
+
+if [[ $# -eq 0 ]]; then
+  exec bundle exec ruby -Ilib -Itest -e 'Dir.glob("test/test_*.rb").each { |f| require_relative f }'
+else
+  exec bundle exec ruby -Ilib -Itest "$@"
+fi

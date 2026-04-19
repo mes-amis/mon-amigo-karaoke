@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Launch the karaoke web UI with a public ngrok tunnel.
+#
+# Usage:
+#   ./web/bin/serve                 # launches puma + ngrok on port 4567
+#   PORT=5000 ./web/bin/serve       # override the port
+#   KARAOKE_ADMIN_PASSWORD=hunter2 ./web/bin/serve
+#
+# Requires: bundler, ngrok (brew install ngrok). Ngrok must be authenticated
+# (run `ngrok config add-authtoken <token>` once).
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+PORT="${PORT:-4567}"
+NGROK_API="${NGROK_API:-http://127.0.0.1:4040/api/tunnels}"
+
+if ! command -v ngrok >/dev/null 2>&1; then
+  echo "error: ngrok not on PATH. Install with: brew install ngrok" >&2
+  echo "(then authenticate: ngrok config add-authtoken <your-token>)" >&2
+  exit 1
+fi
+
+if [[ ! -f Gemfile.lock ]]; then
+  echo "[web] first-run: installing gems..."
+  bundle install
+fi
+
+if [[ -z "${KARAOKE_ADMIN_PASSWORD:-}" ]]; then
+  echo "[web] note: KARAOKE_ADMIN_PASSWORD not set — /admin password defaults to \"Austin\"."
+  echo "[web]       override before a real event (e.g. export it from 1Password: \`op read ...\`)."
+fi
+
+mkdir -p data tmp
+
+puma_pid=""
+ngrok_pid=""
+
+cleanup() {
+  local code=$?
+  if [[ -n "$puma_pid" ]] && kill -0 "$puma_pid" 2>/dev/null; then
+    kill "$puma_pid" 2>/dev/null || true
+    wait "$puma_pid" 2>/dev/null || true
+  fi
+  if [[ -n "$ngrok_pid" ]] && kill -0 "$ngrok_pid" 2>/dev/null; then
+    kill "$ngrok_pid" 2>/dev/null || true
+    wait "$ngrok_pid" 2>/dev/null || true
+  fi
+  exit "$code"
+}
+trap cleanup INT TERM EXIT
+
+echo "[web] starting ngrok on port $PORT..."
+ngrok http "$PORT" --log=stdout >tmp/ngrok.log 2>&1 &
+ngrok_pid=$!
+
+# Poll ngrok's local API until it returns a public URL.
+url=""
+for _ in $(seq 1 40); do
+  sleep 0.25
+  url=$(curl -s "$NGROK_API" 2>/dev/null | /usr/bin/python3 -c '
+import json, sys
+try:
+  d = json.load(sys.stdin)
+  tunnels = d.get("tunnels", [])
+  https = next((t for t in tunnels if t.get("public_url", "").startswith("https://")), None)
+  pick = https or (tunnels[0] if tunnels else None)
+  print(pick["public_url"] if pick else "", end="")
+except Exception:
+  pass
+' || true)
+  [[ -n "$url" ]] && break
+done
+
+if [[ -z "$url" ]]; then
+  echo "[web] ngrok didn't expose a tunnel (see tmp/ngrok.log)" >&2
+  exit 1
+fi
+
+echo "[web] ngrok tunnel: $url"
+echo "[web] stage (open on the TV/big screen): http://127.0.0.1:$PORT/stage"
+echo "[web] participant URL (QR code links here): $url"
+echo
+
+bundle exec puma -p "$PORT" -e "${RACK_ENV:-production}" &
+puma_pid=$!
+
+wait "$puma_pid"

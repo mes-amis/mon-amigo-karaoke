@@ -1,0 +1,49 @@
+<script>
+  window.__STAGE_IS_ADMIN__ = <%= admin? ? "true" : "false" %>;
+</script>
+
+<div class="stage" id="stageWaiting">
+  <aside class="stage-left">
+    <h1 class="stage-brand">mon amigo <span class="brand-accent">karaoke</span></h1>
+    <div class="qr-box">
+      <%= @qr %>
+      <div class="qr-caption">
+        <div class="qr-label">scan to join</div>
+        <div class="qr-url"><%= h(@join_url) %></div>
+        <% unless @tunnel_url %>
+          <div class="qr-hint">(local URL — start ngrok to share publicly)</div>
+        <% end %>
+      </div>
+    </div>
+    <% if admin? %>
+      <form method="post" action="/admin/start-next" class="stage-start-form">
+        <button class="primary stage-start" id="stageStartBtn">Start next performance</button>
+      </form>
+    <% end %>
+  </aside>
+
+  <section class="stage-right">
+    <div class="now-playing" id="nowPlaying">
+      <div class="np-label">now performing</div>
+      <div class="np-title" id="npTitle">—</div>
+      <div class="np-performer" id="npPerformer"></div>
+    </div>
+    <h2 class="up-next">up next</h2>
+    <ol class="queue" id="queue">
+      <li class="muted">queue is empty — scan the QR to join</li>
+    </ol>
+  </section>
+</div>
+
+<% if admin? %>
+  <div class="stage-player" id="stagePlayer" hidden>
+    <video id="stageVideo" playsinline controls></video>
+    <div class="stage-player-bar">
+      <div class="sp-meta">
+        <div class="sp-performer" id="spPerformer">—</div>
+        <div class="sp-title" id="spTitle">—</div>
+      </div>
+      <button class="link" id="spExit" type="button">return to queue</button>
+    </div>
+  </div>
+<% end %>
