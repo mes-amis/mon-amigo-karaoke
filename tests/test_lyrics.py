@@ -63,78 +63,91 @@ def test_align_words_returns_input_when_no_whisper_words() -> None:
 # --- corrections ---------------------------------------------------
 
 
-def test_align_words_corrects_a_misheard_word() -> None:
-    """Whisper heard 'sea' but the lyric is 'see'."""
+def test_align_words_swaps_a_close_typo() -> None:
+    """1:1 replace where the words are similar enough — typo fix.
+    'sea' vs 'see' both normalize to 3 chars sharing 'se' — high enough
+    similarity to assume the singer meant 'see'.
+    """
     words = [w("I", 1.0, 1.2), w("sea", 1.3, 1.7), w("you", 1.8, 2.1)]
 
     out = align_words(words, "I see you")
 
     assert [o.text for o in out] == ["I", "see", "you"]
-    # Timing for the corrected word matches the original's timing.
+    # Timing on the corrected word is unchanged.
     assert out[1].start == 1.3 and out[1].end == 1.7
 
 
-def test_align_words_handles_n_to_m_replacement_by_dividing_time() -> None:
-    """Whisper said 'wanna' (1 word); Genius says 'want to' (2)."""
+def test_align_words_keeps_whisper_when_replacement_is_dissimilar() -> None:
+    """1:1 replace where the words are NOT similar — different word
+    entirely. We keep Whisper to avoid changing what the singer sang.
+    """
+    words = [
+        w("hello", 1.0, 1.4),
+        w("kafka", 1.5, 1.9),       # totally unrelated to Genius's 'world'
+    ]
+
+    out = align_words(words, "hello world")
+
+    assert [o.text for o in out] == ["hello", "kafka"]
+
+
+def test_align_words_keeps_whisper_for_uneven_replacement() -> None:
+    """N:M replacement (counts differ) is treated as live rephrasing
+    rather than a typo. 'wanna' stays even though Genius writes
+    'want to' — the singer probably said 'wanna'."""
     words = [
         w("I", 0.0, 0.4),
-        w("wanna", 0.5, 1.5),  # 1.0s span will be split across two Genius words
+        w("wanna", 0.5, 1.5),
         w("dance", 1.6, 2.0),
     ]
 
     out = align_words(words, "I want to dance")
 
-    assert [o.text for o in out] == ["I", "want", "to", "dance"]
-    # The 'wanna' span 0.5-1.5 splits in half: 0.5-1.0 and 1.0-1.5.
-    assert out[1].start == pytest.approx(0.5, abs=1e-6)
-    assert out[1].end == pytest.approx(1.0, abs=1e-6)
-    assert out[2].start == pytest.approx(1.0, abs=1e-6)
-    assert out[2].end == pytest.approx(1.5, abs=1e-6)
+    assert [o.text for o in out] == ["I", "wanna", "dance"]
+    # Timing untouched too.
+    assert out[1].start == 0.5 and out[1].end == 1.5
 
 
-def test_align_words_drops_whisper_hallucinations() -> None:
-    """Whisper inserted a phantom 'uh' that isn't in the lyric."""
+def test_align_words_keeps_whisper_extras_for_live_adlibs() -> None:
+    """Whisper picked up a word Genius doesn't have ('uh', 'yeah',
+    crowd banter). KEEP it — live performances need this preserved."""
     words = [
         w("hello", 1.0, 1.4),
-        w("uh", 1.5, 1.7),     # not in Genius
+        w("yeah", 1.5, 1.7),       # not in Genius
         w("world", 1.8, 2.2),
     ]
 
     out = align_words(words, "hello world")
 
-    assert [o.text for o in out] == ["hello", "world"]
+    assert [o.text for o in out] == ["hello", "yeah", "world"]
 
 
-def test_align_words_inserts_missed_genius_words_with_interpolated_time() -> None:
-    """Whisper missed a word in the middle. Insert it between neighbors."""
+def test_align_words_does_not_fabricate_missed_genius_words() -> None:
+    """Genius has a word Whisper didn't catch. SKIP — we won't add words
+    the singer didn't perform (or that we have no timing for)."""
     words = [
         w("hello", 1.0, 1.4),
-        w("world", 2.4, 2.8),  # 1.0s gap where the missed word lives
+        w("world", 2.4, 2.8),
     ]
 
     out = align_words(words, "hello bright world")
 
-    assert [o.text for o in out] == ["hello", "bright", "world"]
-    bright = out[1]
-    # Bright is interpolated between hello.end (1.4) and world.start (2.4).
-    assert bright.start == pytest.approx(1.4, abs=1e-6)
-    assert bright.end == pytest.approx(2.4, abs=1e-6)
-
-
-def test_align_words_inserts_missed_word_at_the_end() -> None:
-    """Whisper cut off before the last word."""
-    words = [w("hello", 1.0, 1.4)]
-    out = align_words(words, "hello world", fallback_word_seconds=0.5)
     assert [o.text for o in out] == ["hello", "world"]
-    # The trailing word gets fallback_word_seconds of duration starting
-    # right after the last Whisper word.
-    assert out[1].start == pytest.approx(1.4, abs=1e-6)
-    assert out[1].end == pytest.approx(1.9, abs=1e-6)
+    # Original timings come through untouched.
+    assert out[0].end == 1.4 and out[1].start == 2.4
+
+
+def test_align_words_does_not_append_trailing_genius_word() -> None:
+    """Last Whisper word is the last we render — no fabricated tail."""
+    words = [w("hello", 1.0, 1.4)]
+    out = align_words(words, "hello world")
+    assert [o.text for o in out] == ["hello"]
 
 
 def test_align_words_preserves_punctuation_from_genius() -> None:
-    """Whisper rarely has punctuation; Genius does — and we want to keep it
-    (downstream group_into_lines uses it as a phrase boundary)."""
+    """Equal-block path: Whisper rarely has punctuation; Genius does.
+    group_into_lines uses commas/periods as phrase boundaries, so it
+    matters that we pick them up here."""
     words = [w("hello", 1.0, 1.4), w("world", 1.5, 1.9)]
 
     out = align_words(words, "Hello, world!")
@@ -143,24 +156,29 @@ def test_align_words_preserves_punctuation_from_genius() -> None:
     assert out[1].text == "world!"
 
 
-def test_align_words_combined_replace_and_insert(monkeypatch=None) -> None:
-    """A more realistic mix: typo + missed word."""
+def test_align_words_full_realistic_mix() -> None:
+    """One of each kind of difference at once.
+
+    - "dont" -> "don't" (1:1 close swap)
+    - missing "what to do" (insert -> skipped)
+    - extra "yeah" (delete -> kept)
+    - "anymore" matches verbatim (equal)
+    """
     words = [
         w("I", 0.0, 0.2),
         w("dont", 0.3, 0.6),
         w("know", 0.7, 1.0),
-        w("anymore", 1.5, 2.0),  # Whisper missed "what to do"
+        w("anymore", 1.5, 2.0),
+        w("yeah", 2.1, 2.3),       # Whisper extra; not in Genius
     ]
     canonical = "I don't know what to do anymore"
 
     out = align_words(words, canonical)
 
     assert [o.text for o in out] == [
-        "I", "don't", "know", "what", "to", "do", "anymore",
+        "I", "don't", "know", "anymore", "yeah",
     ]
-    # The Whisper words that did match keep their original timing.
-    assert out[0].start == 0.0 and out[2].end == 1.0
-    # The inserted "what to do" sits between know.end (1.0) and
-    # anymore.start (1.5).
-    inserted = out[3:6]
-    assert all(1.0 <= word.start < word.end <= 1.5 for word in inserted)
+    # Original timings preserved everywhere.
+    assert out[1].start == 0.3 and out[1].end == 0.6
+    assert out[3].start == 1.5 and out[3].end == 2.0
+    assert out[4].start == 2.1 and out[4].end == 2.3

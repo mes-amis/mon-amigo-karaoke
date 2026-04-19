@@ -12,6 +12,7 @@ same file is instant; modifying or moving the file invalidates the cache.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -44,7 +45,17 @@ Runner = Callable[[list[str]], None]
 def _default_runner(cmd: list[str]) -> None:
     # Don't capture — Demucs prints a tqdm progress bar that the user
     # should see while a 4-minute song is being separated.
-    subprocess.run(cmd, check=True)
+    #
+    # PYTHONWARNINGS suppresses two benign UserWarnings from torchaudio
+    # that fire on every saved stem ("encoding/bits_per_sample not fully
+    # supported by TorchCodec AudioEncoder"). The WAVs still write
+    # correctly — torchcodec just uses its default bit depth — and our
+    # downstream ffmpeg mix re-encodes everything anyway.
+    env = {
+        **os.environ,
+        "PYTHONWARNINGS": "ignore::UserWarning:torchaudio",
+    }
+    subprocess.run(cmd, check=True, env=env)
 
 
 def _cache_key(audio: Path, model: str) -> str:

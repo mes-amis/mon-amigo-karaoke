@@ -95,11 +95,32 @@ def align_words(
     whisper_words: list[Word],
     lyrics_text: str,
     *,
-    fallback_word_seconds: float = 0.4,
+    similarity_threshold: float = 0.6,
 ) -> list[Word]:
-    """Map Whisper's word-level timings onto the canonical Genius lyrics.
+    """Apply Genius as a *copy-edit* pass over Whisper's transcription.
 
-    Falls back to the input list unchanged if either side is empty.
+    The earlier wholesale-replacement version pushed Whisper's text
+    fully onto the Genius lyric, which broke live performances —
+    ad-libs got dropped, repeated choruses lost their repetitions,
+    and rephrased lines were forced back to the studio version.
+
+    This version is gentler:
+
+    - **equal** runs swap to Genius's spelling/casing/punctuation
+      (e.g. ``dont`` -> ``don't``), keeping Whisper's exact timing;
+    - **replace** runs of equal length swap each pair only when the
+      two words are *phonetically close* (sequence-similarity above
+      ``similarity_threshold``) — that's a typo fix
+      (``sea`` -> ``see``), not a meaning change;
+    - **replace** runs of unequal length are kept as Whisper heard
+      them (``wanna`` stays ``wanna``, even if Genius wrote
+      ``want to``);
+    - **delete** runs (Whisper words Genius doesn't have) are kept
+      verbatim — these are usually live banter, ad-libs, or repeats;
+    - **insert** runs (Genius words Whisper didn't pick up) are
+      *skipped* — we don't fabricate words the singer didn't sing.
+
+    Returns the input unchanged when either side is empty.
     """
     if not whisper_words or not lyrics_text:
         return whisper_words
@@ -116,11 +137,10 @@ def align_words(
 
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
-            for offset in range(i2 - i1):
-                w = whisper_words[i1 + offset]
-                # Use the Genius spelling/casing/punctuation, keep timing.
+            for k in range(i2 - i1):
+                w = whisper_words[i1 + k]
                 out.append(Word(
-                    text=genius_tokens[j1 + offset],
+                    text=genius_tokens[j1 + k],
                     start=w.start,
                     end=w.end,
                 ))
@@ -128,54 +148,41 @@ def align_words(
         elif tag == "replace":
             n_w = i2 - i1
             n_g = j2 - j1
-            if n_w == 0 or n_g == 0:
-                continue
-            t_start = whisper_words[i1].start
-            t_end = whisper_words[i2 - 1].end
             if n_w == n_g:
-                # Same count — keep each Whisper word's individual timing.
-                for k in range(n_g):
+                # 1:1 — swap when the pair looks like a typo, keep
+                # otherwise. Threshold deliberately on the conservative
+                # side so unrelated word swaps are left alone.
+                for k in range(n_w):
                     w = whisper_words[i1 + k]
-                    out.append(Word(
-                        text=genius_tokens[j1 + k],
-                        start=w.start,
-                        end=w.end,
-                    ))
+                    similarity = SequenceMatcher(
+                        None, w_norm[i1 + k], g_norm[j1 + k],
+                    ).ratio()
+                    if similarity >= similarity_threshold:
+                        out.append(Word(
+                            text=genius_tokens[j1 + k],
+                            start=w.start,
+                            end=w.end,
+                        ))
+                    else:
+                        out.append(w)
             else:
-                # N:M — divide the total span evenly across the new words.
-                duration = max(0.05, t_end - t_start)
-                step = duration / n_g
-                for k in range(n_g):
-                    out.append(Word(
-                        text=genius_tokens[j1 + k],
-                        start=t_start + k * step,
-                        end=t_start + (k + 1) * step,
-                    ))
+                # N:M — likely a genuine wording difference (live
+                # rephrasing, contractions, dropped/added syllables).
+                # Keep Whisper's words verbatim.
+                for k in range(n_w):
+                    out.append(whisper_words[i1 + k])
 
         elif tag == "delete":
-            # Whisper had words Genius doesn't — most likely hallucinated
-            # filler. Drop them; their time is absorbed by the gap.
-            continue
+            # Whisper sang words Genius doesn't list. KEEP them —
+            # live performances are full of "alright!", "here we go!",
+            # repeated choruses, etc. that should still appear in the
+            # karaoke.
+            for k in range(i2 - i1):
+                out.append(whisper_words[i1 + k])
 
         elif tag == "insert":
-            # Genius has words Whisper missed. Interpolate between the
-            # last emitted word and the next Whisper word.
-            n_g = j2 - j1
-            t_start = (
-                out[-1].end if out
-                else (whisper_words[i1 - 1].end if i1 > 0 else 0.0)
-            )
-            if i1 < len(whisper_words):
-                t_end = whisper_words[i1].start
-            else:
-                t_end = t_start + n_g * fallback_word_seconds
-            duration = max(0.05, t_end - t_start)
-            step = duration / n_g
-            for k in range(n_g):
-                out.append(Word(
-                    text=genius_tokens[j1 + k],
-                    start=t_start + k * step,
-                    end=t_start + (k + 1) * step,
-                ))
+            # Genius has words Whisper didn't catch. SKIP — we can't
+            # know if the singer actually performed them.
+            continue
 
     return out
