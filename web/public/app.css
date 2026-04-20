@@ -259,37 +259,44 @@ form.inline { display: inline-block; }
 }
 .stage {
   display: grid;
-  grid-template-columns: 480px 1fr;
+  grid-template-columns: 440px 1fr;
+  align-items: start;       /* don't stretch cards to row height */
   gap: 48px;
   padding: 48px 56px;
   min-height: 100vh;
 }
+.stage-left { display: flex; flex-direction: column; gap: 24px; }
 .stage-brand {
   font-size: 40px;
-  margin: 0 0 28px;
+  margin: 0 0 4px;
   letter-spacing: 0.01em;
 }
 .qr-box {
   background: #fff;
   border-radius: 20px;
-  padding: 24px;
+  padding: 18px 18px 16px;
   box-shadow: 0 0 80px rgba(255,62,168,0.4), 0 20px 60px rgba(0,0,0,0.6);
 }
-.qr-box .qr { display: block; width: 100%; height: auto; }
+.qr-box .qr {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+}
 .qr-caption {
   color: #0b0a1e;
-  margin-top: 14px;
+  margin-top: 12px;
   text-align: center;
 }
 .qr-label {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 .qr-url {
   font-family: "SF Mono", ui-monospace, monospace;
-  font-size: 14px;
+  font-size: 13px;
   margin-top: 4px;
   word-break: break-all;
   color: #4a3f6e;
@@ -363,7 +370,7 @@ form.inline { display: inline-block; }
   color: var(--warn);
 }
 
-.stage-start-form { margin-top: 24px; }
+.stage-start-form { margin-top: 0; }
 .stage-start {
   width: 100%;
   font-size: 18px;
@@ -481,7 +488,7 @@ form.inline { display: inline-block; }
 
 /* Shrink stage gracefully on smaller displays too */
 @media (max-width: 1100px) {
-  .stage { grid-template-columns: 360px 1fr; gap: 32px; padding: 32px; }
+  .stage { grid-template-columns: 340px 1fr; gap: 32px; padding: 32px; }
   .np-title { font-size: 42px; }
   .queue li { font-size: 20px; }
 }

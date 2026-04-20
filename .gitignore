@@ -10,3 +10,4 @@ env/
 *.ass
 *.png
 !src/**/*.png
+/.playwright-mcp
